@@ -1,13 +1,53 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../lib/axios';
-import { DollarSign, TrendingUp, CheckCircle, Clock } from 'lucide-react';
+import { DollarSign, TrendingUp, CheckCircle, Clock, BarChart3 } from 'lucide-react';
+
+function PayrollBarChart({ data }) {
+  const maxValue = Math.max(...data.map(item => Math.abs(item.value)), 1);
+
+  return (
+    <div className="flex items-end gap-3 overflow-x-auto pb-1" style={{ height: 220 }}>
+      {data.map((item) => (
+        <div key={item.label} className="flex h-full min-w-16 flex-1 flex-col items-center justify-end gap-2">
+          <span className="text-xs font-semibold text-center" style={{ color: 'var(--text-primary)' }}>{item.displayValue}</span>
+          <div
+            className="w-full max-w-20 rounded-t transition-all duration-500"
+            style={{ height: `${Math.max((Math.abs(item.value) / maxValue) * 145, item.value ? 6 : 0)}px`, background: item.color || 'var(--orange)' }}
+            title={`${item.label}: ${item.displayValue}`}
+          />
+          <span className="w-full truncate text-center text-xs" style={{ color: 'var(--text-secondary)' }}>{item.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PayrollStatCard({ label, value, detail, icon: Icon, color, selected, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className="card w-full text-left transition-all hover:-translate-y-0.5 focus:outline-none focus:ring-2"
+      style={{ borderColor: selected ? 'var(--orange)' : 'var(--border)', '--tw-ring-color': 'var(--orange)' }}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{label}</p>
+        <Icon size={18} style={{ color }} />
+      </div>
+      <p className="text-3xl font-bold" style={{ color }}>{value}</p>
+      <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>{detail}</p>
+    </button>
+  );
+}
 
 function AccountingDashboard() {
   const navigate = useNavigate();
   const [payrollData, setPayrollData] = useState(null);
   const [leaveImpact, setLeaveImpact] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [selectedPayrollMetric, setSelectedPayrollMetric] = useState('total');
 
   useEffect(() => {
     fetchData();
@@ -37,73 +77,106 @@ function AccountingDashboard() {
     ]);
   };
 
+  const payrollCharts = {
+    total: {
+      title: 'Total Payroll',
+      description: 'Reported payroll total for this month.',
+      data: [{
+        label: 'This month',
+        value: payrollData?.total || 0,
+        displayValue: `$${(payrollData?.total || 0).toLocaleString()}`,
+        color: '#22C55E',
+      }],
+    },
+    deductions: {
+      title: 'Leave Deductions',
+      description: 'Reported unpaid leave deduction total.',
+      data: [{
+        label: 'This month',
+        value: payrollData?.deductions || 0,
+        displayValue: `$${(payrollData?.deductions || 0).toLocaleString()}`,
+        color: '#DC2626',
+      }],
+    },
+    pending: {
+      title: 'Payroll Items by Status',
+      description: 'Pending items compared with processed transaction records.',
+      data: [
+        { label: 'Pending items', value: payrollData?.pending || 0, displayValue: String(payrollData?.pending || 0), color: '#F59E0B' },
+        { label: 'Processed items', value: payrollData?.processed || 0, displayValue: String(payrollData?.processed || 0), color: '#22C55E' },
+      ],
+    },
+    processed: {
+      title: 'Processed Transaction Amounts',
+      description: 'Recent payroll-related transaction values, grouped by employee and type.',
+      data: transactions.map(transaction => ({
+        label: transaction.employee.split(' ')[0],
+        value: Math.abs(transaction.amount),
+        displayValue: `${transaction.amount > 0 ? '+' : '-'}$${Math.abs(transaction.amount).toLocaleString()}`,
+        color: transaction.status === 'processed' ? '#22C55E' : '#F59E0B',
+      })),
+    },
+    departmentDays: {
+      title: 'Unpaid Leave Days by Department',
+      description: 'Unpaid leave days behind the department cost impact.',
+      data: leaveImpact.map(department => ({
+        label: department.department,
+        value: department.unpaid_days,
+        displayValue: `${department.unpaid_days} days`,
+        color: '#F59E0B',
+      })),
+    },
+    transactions: {
+      title: 'Recent Transaction Amounts',
+      description: 'Amounts shown by transaction, colored by processing status.',
+      data: transactions.map(transaction => ({
+        label: transaction.type.replace(' ', '\n'),
+        value: Math.abs(transaction.amount),
+        displayValue: `${transaction.amount > 0 ? '+' : '-'}$${Math.abs(transaction.amount).toLocaleString()}`,
+        color: transaction.status === 'processed' ? '#22C55E' : '#F59E0B',
+      })),
+    },
+  };
+  const activePayrollChart = payrollCharts[selectedPayrollMetric];
+
   return (
     <div className="space-y-6" data-testid="accounting-dashboard">
       {/* Payroll Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="card">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
-              Total Payroll
-            </p>
-            <DollarSign size={18} style={{ color: 'var(--success)' }} />
-          </div>
-          <p className="text-3xl font-bold" style={{ color: 'var(--success)' }}>
-            ${payrollData?.total.toLocaleString()}
-          </p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-            This month
-          </p>
-        </div>
-
-        <div className="card">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
-              Leave Deductions
-            </p>
-            <TrendingUp size={18} style={{ color: 'var(--danger)' }} />
-          </div>
-          <p className="text-3xl font-bold" style={{ color: 'var(--danger)' }}>
-            ${payrollData?.deductions.toLocaleString()}
-          </p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Unpaid leave impact
-          </p>
-        </div>
-
-        <div className="card">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
-              Pending Items
-            </p>
-            <Clock size={18} style={{ color: 'var(--warning)' }} />
-          </div>
-          <p className="text-3xl font-bold" style={{ color: 'var(--warning)' }}>
-            {payrollData?.pending}
-          </p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-            Awaiting approval
-          </p>
-        </div>
-
-        <div className="card">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>
-              Processed
-            </p>
-            <CheckCircle size={18} style={{ color: 'var(--success)' }} />
-          </div>
-          <p className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            {payrollData?.processed}
-          </p>
-          <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-            This month
-          </p>
-        </div>
+        <PayrollStatCard label="Total Payroll" value={`$${payrollData?.total.toLocaleString()}`} detail="This month" icon={DollarSign} color="var(--success)" selected={selectedPayrollMetric === 'total'} onClick={() => setSelectedPayrollMetric('total')} />
+        <PayrollStatCard label="Leave Deductions" value={`$${payrollData?.deductions.toLocaleString()}`} detail="Unpaid leave impact" icon={TrendingUp} color="var(--danger)" selected={selectedPayrollMetric === 'deductions'} onClick={() => setSelectedPayrollMetric('deductions')} />
+        <PayrollStatCard label="Pending Items" value={payrollData?.pending} detail="Awaiting approval" icon={Clock} color="var(--warning)" selected={selectedPayrollMetric === 'pending'} onClick={() => setSelectedPayrollMetric('pending')} />
+        <PayrollStatCard label="Processed" value={payrollData?.processed} detail="This month" icon={CheckCircle} color="var(--success)" selected={selectedPayrollMetric === 'processed'} onClick={() => setSelectedPayrollMetric('processed')} />
       </div>
 
+      <section className="card border-l-4" style={{ borderLeftColor: 'var(--orange)' }} aria-live="polite">
+        <div className="flex items-center gap-3 mb-5">
+          <BarChart3 size={20} style={{ color: 'var(--orange)' }} />
+          <div>
+            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{activePayrollChart.title}</h3>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{activePayrollChart.description}</p>
+          </div>
+        </div>
+        {activePayrollChart.data.length ? <PayrollBarChart data={activePayrollChart.data} /> : (
+          <p className="py-10 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>No payroll data available for this graph yet.</p>
+        )}
+      </section>
+
       {/* Leave Impact by Department */}
-      <div className="card">
+      <div
+        className="card cursor-pointer transition-all hover:-translate-y-0.5 focus:outline-none focus:ring-2"
+        role="button"
+        tabIndex={0}
+        aria-pressed={selectedPayrollMetric === 'departmentDays'}
+        onClick={() => setSelectedPayrollMetric('departmentDays')}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setSelectedPayrollMetric('departmentDays');
+          }
+        }}
+        style={{ borderColor: selectedPayrollMetric === 'departmentDays' ? 'var(--orange)' : 'var(--border)', '--tw-ring-color': 'var(--orange)' }}
+      >
         <h3 className="text-xl font-bold mb-4" style={{ color: 'var(--text-primary)' }}>
           Leave Impact by Department
         </h3>
@@ -207,7 +280,20 @@ function AccountingDashboard() {
       </div>
 
       {/* Recent Transactions */}
-      <div className="card">
+      <div
+        className="card cursor-pointer transition-all hover:-translate-y-0.5 focus:outline-none focus:ring-2"
+        role="button"
+        tabIndex={0}
+        aria-pressed={selectedPayrollMetric === 'transactions'}
+        onClick={() => setSelectedPayrollMetric('transactions')}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setSelectedPayrollMetric('transactions');
+          }
+        }}
+        style={{ borderColor: selectedPayrollMetric === 'transactions' ? 'var(--orange)' : 'var(--border)', '--tw-ring-color': 'var(--orange)' }}
+      >
         <h3 className="text-xl font-bold mb-4" style={{ color: 'var(--text-primary)' }}>
           Recent Transactions
         </h3>

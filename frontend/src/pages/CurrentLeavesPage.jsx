@@ -4,7 +4,7 @@ import api from '../lib/axios';
 import { toast } from 'sonner';
 import {
   X, Mail, Users, AlertTriangle,
-  CheckCircle, Clock, Heart, Stethoscope, MessageSquare, Calendar,
+  CheckCircle, Clock, Heart, Stethoscope, MessageSquare, Calendar, Download,
 } from 'lucide-react';
 
 const TYPE_CONFIG = {
@@ -43,6 +43,14 @@ function PerformanceBar({ score }) {
   );
 }
 
+function escapeDocumentText(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function EmployeeDrawer({ employeeId, onClose }) {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
@@ -56,6 +64,44 @@ function EmployeeDrawer({ employeeId, onClose }) {
       .catch(() => toast.error('Failed to load employee profile'))
       .finally(() => setLoading(false));
   }, [employeeId]);
+
+  const downloadMonthlyPerformance = () => {
+    if (!data) return;
+
+    const reportDate = new Date();
+    const monthLabel = reportDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const fileMonth = `${reportDate.getFullYear()}-${String(reportDate.getMonth() + 1).padStart(2, '0')}`;
+    const employeeName = `${data.employee.first_name || ''} ${data.employee.last_name || ''}`.trim();
+    const monthlyLeave = (data.leave_history || []).filter((leave) => {
+      const leaveDate = leave.start_date ? new Date(leave.start_date) : null;
+      return leaveDate && leaveDate.getFullYear() === reportDate.getFullYear() && leaveDate.getMonth() === reportDate.getMonth();
+    });
+    const leaveRows = monthlyLeave.length
+      ? monthlyLeave.map((leave) => `
+          <tr>
+            <td>${escapeDocumentText(leave.type)}</td>
+            <td>${escapeDocumentText(leave.status)}</td>
+            <td>${leave.start_date ? new Date(leave.start_date).toLocaleDateString('en-US') : '—'}</td>
+            <td>${escapeDocumentText(leave.days_count || 0)}</td>
+          </tr>`).join('')
+      : '<tr><td colspan="4">No leave activity recorded this month.</td></tr>';
+    const document = `<!doctype html><html><head><meta charset="utf-8"><title>Monthly Performance Report</title>
+      <style>body{font-family:Arial,sans-serif;color:#1f2937;padding:32px}h1{color:#f4631e}h2{margin-top:28px;color:#374151}.meta{color:#6b7280}.stats{display:flex;gap:16px;margin:20px 0}.stat{border:1px solid #d1d5db;padding:14px;min-width:130px}.value{font-size:24px;font-weight:700}table{border-collapse:collapse;width:100%;margin-top:12px}th,td{border:1px solid #d1d5db;padding:10px;text-align:left}th{background:#f3f4f6}</style>
+      </head><body><h1>Monthly Performance Report</h1>
+      <p class="meta"><strong>Reporting month:</strong> ${escapeDocumentText(monthLabel)}</p>
+      <p class="meta"><strong>Employee:</strong> ${escapeDocumentText(employeeName)}<br><strong>Role:</strong> ${escapeDocumentText(data.employee.role?.replace('_', ' '))}<br><strong>Email:</strong> ${escapeDocumentText(data.employee.email)}</p>
+      <h2>Performance Overview</h2><div class="stats"><div class="stat"><div>Work performance</div><div class="value">${escapeDocumentText(data.stats.performance_score)}%</div></div><div class="stat"><div>Annual days used</div><div class="value">${escapeDocumentText(data.stats.annual_days_used)}</div></div><div class="stat"><div>Sick days used</div><div class="value">${escapeDocumentText(data.stats.sick_days_used)}</div></div><div class="stat"><div>Emergency leaves</div><div class="value">${escapeDocumentText(data.stats.emergency_count)}</div></div></div>
+      <h2>Leave Activity for ${escapeDocumentText(monthLabel)}</h2><table><thead><tr><th>Type</th><th>Status</th><th>Start date</th><th>Days</th></tr></thead><tbody>${leaveRows}</tbody></table>
+      <p class="meta">Generated on ${escapeDocumentText(reportDate.toLocaleString('en-US'))} from Happen.</p></body></html>`;
+    const blob = new Blob([document], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const link = window.document.createElement('a');
+    link.href = url;
+    link.download = `monthly-performance-${employeeName.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'employee'}-${fileMonth}.doc`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success('Monthly performance document downloaded');
+  };
 
   if (!employeeId) return null;
 
@@ -168,6 +214,20 @@ function EmployeeDrawer({ employeeId, onClose }) {
 
               {/* Performance */}
               <div className="p-4 rounded-xl" style={{ background: 'var(--page-bg)' }}>
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+                    Monthly performance
+                  </p>
+                  <button
+                    type="button"
+                    onClick={downloadMonthlyPerformance}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                    style={{ background: 'var(--orange)' }}
+                    title="Download monthly performance document"
+                  >
+                    <Download size={14} /> Download document
+                  </button>
+                </div>
                 <PerformanceBar score={data.stats.performance_score} />
               </div>
 

@@ -4,10 +4,20 @@ import User from '../db/models/User.js'
 import LeaveRequest from '../db/models/LeaveRequest.js'
 import { verifyToken } from '../middleware/auth.js'
 import { requireRole } from '../middleware/roleGuard.js'
+import { canAccessTeam } from '../utils/privacyPolicies.js'
 
 const router = express.Router()
 
 const todayStr = () => new Date().toISOString().split('T')[0]
+
+router.use('/:teamId', verifyToken, async (req, res, next) => {
+  try {
+    const actor = await User.findById(req.user.id, 'role team_id').lean()
+    if (!actor) return res.status(404).json({ error: 'User not found' })
+    if (canAccessTeam(actor, req.params.teamId)) return next()
+    return res.status(403).json({ error: 'Forbidden' })
+  } catch (e) { return res.status(500).json({ error: 'Server error' }) }
+})
 
 router.get('/:teamId/workload', verifyToken, async (req, res) => {
   try {
@@ -39,10 +49,6 @@ router.get('/:teamId/workload', verifyToken, async (req, res) => {
 
 router.get('/:teamId/requests', verifyToken, requireRole('team_lead','manager','hr','admin'), async (req, res) => {
   try {
-    const me = await User.findById(req.user.id).lean()
-    if (!['hr','admin','manager'].includes(me.role) && me.team_id?.toString() !== req.params.teamId) {
-      return res.status(403).json({ error: 'Forbidden' })
-    }
     const members = await User.find({ team_id: req.params.teamId }, '_id').lean()
     const ids = members.map(m => m._id)
     const requests = await LeaveRequest.find({ user_id: { $in: ids }, status: { $in: ['pending','queued'] } })
@@ -68,7 +74,7 @@ router.get('/:teamId/calendar', verifyToken, async (req, res) => {
     const ids = members.map(m => m._id)
     const leaves = await LeaveRequest.find({
       user_id: { $in: ids },
-      status:  { $in: ['approved','emergency'] },
+      status:  { $in: ['pending','approved','emergency'] },
     }).populate('user_id','first_name last_name').sort({ start_date: 1 }).lean()
     res.json(leaves.map(l => ({ ...l, id: l._id, first_name: l.user_id?.first_name, last_name: l.user_id?.last_name })))
   } catch (e) { res.status(500).json({ error: 'Server error' }) }

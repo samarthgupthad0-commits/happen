@@ -88,7 +88,7 @@ function CalendarPage() {
             {['manager', 'hr', 'admin'].includes(user?.role) ? 'Company Calendar' : 'Team Calendar'}
           </h2>
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Showing approved and emergency leaves
+            Showing pending, approved, and emergency leaves
           </p>
         </div>
         <div className="flex items-center gap-4">

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/axios';
 import { toast } from 'sonner';
-import { Clock, CheckCircle, Users, Info, Zap, Timer } from 'lucide-react';
+import { Clock, CheckCircle, Users, Info } from 'lucide-react';
 
 function LeavesQueuePage() {
   const navigate = useNavigate();
@@ -11,9 +11,8 @@ function LeavesQueuePage() {
   const [queue, setQueue] = useState([]);
   const [myPosition, setMyPosition] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [granting, setGranting] = useState(false);
-  const [cooldownMins, setCooldownMins] = useState(null);
-  const [countdown, setCountdown] = useState(null);
+  const [grantingRequestId, setGrantingRequestId] = useState(null);
+  const [grantReasons, setGrantReasons] = useState({});
 
   const canGrant = ['manager', 'hr'].includes(user?.role);
   const showMyPosition = ['employee', 'team_lead', 'accounting'].includes(user?.role);
@@ -46,37 +45,24 @@ function LeavesQueuePage() {
 
   useEffect(() => { fetchQueue(); }, [fetchQueue]);
 
-  // Countdown ticker — ticks every minute
-  useEffect(() => {
-    if (!countdown) return;
-    const interval = setInterval(() => {
-      setCountdown(prev => {
-        if (prev <= 1) { clearInterval(interval); setCooldownMins(null); return null; }
-        return prev - 1;
-      });
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [countdown]);
+  const handleGrantSelected = async (request) => {
+    const requestId = request._id || request.id;
+    const reason = grantReasons[requestId]?.trim();
+    if (!reason) {
+      toast.error('Enter a reason before granting this leave.');
+      return;
+    }
 
-  const handleGrantNext = async () => {
-    setGranting(true);
+    setGrantingRequestId(requestId);
     try {
-      const res = await api.post('/queue/grant-next');
+      const res = await api.post(`/queue/${requestId}/grant`, { reason });
       toast.success(res.data.message);
       fetchQueue();
     } catch (err) {
       const data = err.response?.data;
-      if (err.response?.status === 429) {
-        setCooldownMins(data.remaining_minutes);
-        setCountdown(data.remaining_minutes);
-        toast.error(`Cooldown active — ${data.remaining_minutes} min remaining`);
-      } else if (err.response?.status === 404) {
-        toast.info('Queue is empty — nothing to grant.');
-      } else {
-        toast.error(data?.error || 'Failed to grant leave');
-      }
+      toast.error(data?.error || 'Failed to grant leave');
     } finally {
-      setGranting(false);
+      setGrantingRequestId(null);
     }
   };
 
@@ -101,7 +87,7 @@ function LeavesQueuePage() {
         <div>
           <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Leave Queue</h2>
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            All pending leave requests — first submitted, first approved
+            Review queued leave requests and their current position
           </p>
         </div>
         {showMyPosition && (
@@ -115,67 +101,13 @@ function LeavesQueuePage() {
         )}
       </div>
 
-      {/* ── Grant Next (Manager / HR only) ── */}
+      {/* ── Manager / HR grant instructions ── */}
       {canGrant && (
-        <div
-          className="card border-2 transition-all"
-          style={{ borderColor: cooldownMins ? 'var(--border)' : 'var(--orange)' }}
-        >
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-start gap-4">
-              <div
-                className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
-                style={{ background: cooldownMins ? '#F3F4F6' : 'var(--orange-pale)' }}
-              >
-                <Zap size={24} style={{ color: cooldownMins ? '#9CA3AF' : 'var(--orange)' }} />
-              </div>
-              <div>
-                <p className="font-bold text-lg" style={{ color: 'var(--text-primary)' }}>Grant Next Leave</p>
-                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  Approves the top person in the queue. Usable once every <strong>4 hours</strong>.
-                </p>
-                {cooldownMins && (
-                  <div className="flex items-center gap-2 mt-2">
-                    <Timer size={14} style={{ color: 'var(--warning)' }} />
-                    <span className="text-sm font-semibold" style={{ color: 'var(--warning)' }}>
-                      Available in {countdown ?? cooldownMins} min
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <button
-              onClick={handleGrantNext}
-              disabled={granting || !!cooldownMins || queue.length === 0}
-              className="px-6 py-3 rounded-xl font-bold text-white transition-all hover:-translate-y-0.5 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              style={{ background: cooldownMins ? '#9CA3AF' : 'var(--orange)' }}
-            >
-              <Zap size={18} />
-              {granting ? 'Granting…' : queue.length === 0 ? 'Queue Empty' : 'Grant Leave to #1'}
-            </button>
-          </div>
-
-          {/* Preview of #1 */}
-          {queue.length > 0 && (
-            <div className="mt-4 p-3 rounded-lg flex items-center gap-3" style={{ background: 'var(--orange-pale)' }}>
-              <div
-                className="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
-                style={{ background: 'var(--orange)' }}
-              >
-                {queue[0].first_name?.charAt(0)}{queue[0].last_name?.charAt(0)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <span className="font-semibold">{queue[0].first_name} {queue[0].last_name}</span>
-                <span className="text-sm ml-2" style={{ color: 'var(--text-secondary)' }}>
-                  {queue[0].start_date} → {queue[0].end_date} · {queue[0].days_count} day{queue[0].days_count !== 1 ? 's' : ''}
-                </span>
-              </div>
-              <span className="text-xs font-bold px-2 py-1 rounded-full text-white flex-shrink-0" style={{ background: 'var(--orange)' }}>
-                #1 in queue
-              </span>
-            </div>
-          )}
+        <div className="card flex items-start gap-3" style={{ background: 'var(--orange-pale)', borderLeft: '4px solid var(--orange)' }}>
+          <Info size={18} style={{ color: 'var(--orange)', flexShrink: 0, marginTop: 2 }} />
+          <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+            You can grant leave to any person in the queue. Enter a reason on that person’s request before granting it.
+          </p>
         </div>
       )}
 
@@ -227,8 +159,7 @@ function LeavesQueuePage() {
       <div className="card flex items-start gap-3" style={{ background: '#EFF6FF', borderLeft: '4px solid #3B82F6' }}>
         <Info size={18} style={{ color: '#3B82F6', flexShrink: 0, marginTop: 2 }} />
         <p className="text-sm" style={{ color: '#1E40AF' }}>
-          Queue is FIFO — first submitted, first approved. Requests auto-approve when team workload drops below 50%.
-          Emergency leaves bypass the queue entirely.
+          Requests are ordered by queue position. Managers and HR may grant a specific request with a reason. Requests auto-approve when team workload drops below 50%; emergency leaves bypass the queue.
         </p>
       </div>
 
@@ -256,25 +187,23 @@ function LeavesQueuePage() {
               const myId = user?._id || user?.id;
               const reqUserId = req.user_id?.toString();
               const isMe = myId && reqUserId && reqUserId === myId.toString();
-              const isTop = idx === 0;
-              const pos = req.queue_position || idx + 1;
-              const totalInQueue = queue.length;
+              const pos = idx + 1;
 
               return (
                 <div
                   key={req._id || req.id || idx}
-                  className="flex items-center gap-4 p-4 rounded-xl border transition-all hover:shadow-md"
+                  className="flex flex-wrap items-center gap-4 p-4 rounded-xl border transition-all hover:shadow-md"
                   style={{
-                    borderColor: isTop ? 'var(--orange)' : isMe ? '#8B5CF6' : 'var(--border)',
-                    background: isTop ? 'var(--orange-pale)' : isMe ? '#F5F3FF' : 'white',
+                    borderColor: isMe ? '#8B5CF6' : 'var(--border)',
+                    background: isMe ? '#F5F3FF' : 'white',
                   }}
                 >
                   {/* Position badge */}
                   <div
                     className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0"
                     style={{
-                      background: isTop ? 'var(--orange)' : '#F3F4F6',
-                      color: isTop ? 'white' : 'var(--text-primary)',
+                      background: '#F3F4F6',
+                      color: 'var(--text-primary)',
                     }}
                   >
                     {pos}
@@ -283,7 +212,7 @@ function LeavesQueuePage() {
                   {/* Avatar */}
                   <div
                     className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0"
-                    style={{ background: isTop ? 'var(--orange-dark)' : '#6B7280' }}
+                    style={{ background: '#6B7280' }}
                   >
                     {req.first_name?.charAt(0)}{req.last_name?.charAt(0)}
                   </div>
@@ -295,11 +224,6 @@ function LeavesQueuePage() {
                       {isMe && (
                         <span className="px-2 py-0.5 rounded text-xs font-bold text-white" style={{ background: '#8B5CF6' }}>
                           You
-                        </span>
-                      )}
-                      {isTop && (
-                        <span className="px-2 py-0.5 rounded text-xs font-bold text-white" style={{ background: 'var(--orange)' }}>
-                          Next up
                         </span>
                       )}
                       <span
@@ -318,6 +242,7 @@ function LeavesQueuePage() {
                         : ''}
                       {req.days_count ? ` · ${req.days_count} day${req.days_count !== 1 ? 's' : ''}` : ''}
                     </p>
+                    {req.reason && <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Request reason: {req.reason}</p>}
                   </div>
 
                   {/* Submitted */}
@@ -328,21 +253,33 @@ function LeavesQueuePage() {
                     </p>
                   </div>
 
-                  {/* Progress bar — shows how close to front */}
-                  <div className="w-20 flex-shrink-0">
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div
-                        className="h-2 rounded-full transition-all duration-500"
-                        style={{
-                          background: isTop ? 'var(--orange)' : '#D1D5DB',
-                          width: `${Math.round(((totalInQueue - pos + 1) / totalInQueue) * 100)}%`,
-                        }}
-                      />
-                    </div>
-                    <p className="text-xs text-center mt-1" style={{ color: 'var(--text-secondary)' }}>
-                      {pos === 1 ? 'next' : `${pos} of ${totalInQueue}`}
-                    </p>
+                  <div className="text-xs flex-shrink-0" style={{ color: 'var(--text-secondary)' }}>
+                    Queue position {pos}
                   </div>
+
+                  {canGrant && (
+                    <div className="w-full border-t pt-3 flex flex-col sm:flex-row gap-3" style={{ borderColor: 'var(--border)' }}>
+                      <textarea
+                        value={grantReasons[req._id || req.id] || ''}
+                        onChange={(event) => setGrantReasons((previous) => ({ ...previous, [req._id || req.id]: event.target.value }))}
+                        rows={2}
+                        maxLength={500}
+                        placeholder={`Reason for granting leave to ${req.first_name || 'this employee'} (required)`}
+                        aria-label={`Reason for granting leave to ${req.first_name || 'this employee'}`}
+                        className="w-full sm:flex-1 px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2"
+                        style={{ borderColor: 'var(--border)', '--tw-ring-color': 'var(--orange)' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleGrantSelected(req)}
+                        disabled={grantingRequestId === (req._id || req.id) || !grantReasons[req._id || req.id]?.trim()}
+                        className="px-4 py-2 rounded-lg font-semibold text-white self-stretch sm:self-center disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ background: 'var(--orange)' }}
+                      >
+                        {grantingRequestId === (req._id || req.id) ? 'Granting...' : 'Grant this leave'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}

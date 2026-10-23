@@ -13,12 +13,13 @@ function BarChart({ data, color = 'var(--orange)', height = 80 }) {
     <div className="flex items-end gap-1" style={{ height }}>
       {data.map((d, i) => (
         <div key={i} className="flex-1 flex flex-col items-center gap-1">
+          <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)', fontSize: 10 }}>{d.value}</span>
           <div
             className="w-full rounded-t transition-all duration-700"
-            style={{ height: `${(d.value / max) * (height - 20)}px`, background: color, minHeight: d.value > 0 ? 4 : 0 }}
+            style={{ height: `${(d.value / max) * (height - 32)}px`, background: d.color || color, minHeight: d.value > 0 ? 4 : 0 }}
             title={`${d.label}: ${d.value}`}
           />
-          <span className="text-xs" style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{d.label}</span>
+          <span className="text-xs text-center truncate w-full" style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{d.label}</span>
         </div>
       ))}
     </div>
@@ -54,9 +55,15 @@ function DonutChart({ segments, size = 100 }) {
 }
 
 // ── Stat card ─────────────────────────────────────────────────────────────────
-function StatCard({ label, value, sub, color, icon: Icon, trend }) {
+function StatCard({ label, value, sub, color, icon: Icon, trend, onClick, selected }) {
   return (
-    <div className="card">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      className="card text-left transition-all hover:-translate-y-0.5 focus:outline-none focus:ring-2"
+      style={{ width: '100%', borderColor: selected ? 'var(--orange)' : 'var(--border)', '--tw-ring-color': 'var(--orange)' }}
+    >
       <div className="flex items-start justify-between mb-2">
         <p className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>{label}</p>
         {Icon && <Icon size={18} style={{ color }} />}
@@ -73,7 +80,7 @@ function StatCard({ label, value, sub, color, icon: Icon, trend }) {
           </span>
         </div>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -85,9 +92,9 @@ export default function AnalyticsPage() {
   const [overrides, setOverrides] = useState([]);
   const [allLeaves, setAllLeaves] = useState([]);
   const [queue, setQueue] = useState([]);
+  const [selectedMetric, setSelectedMetric] = useState('workload');
 
   useEffect(() => {
-    const isHR = user?.role === 'hr';
     Promise.allSettled([
       api.get('/company/workload'),
       api.get('/company/burnout-risk'),
@@ -120,6 +127,7 @@ export default function AnalyticsPage() {
   const denied    = allLeaves.filter(l => l.status === 'denied').length;
   const queued    = allLeaves.filter(l => l.status === 'queued').length;
   const emergency = allLeaves.filter(l => l.status === 'emergency').length;
+  const pending = allLeaves.filter(l => l.status === 'pending').length;
   const totalLeaves = allLeaves.length;
 
   const approvalRate = totalLeaves > 0 ? Math.round((approved / totalLeaves) * 100) : 0;
@@ -132,12 +140,13 @@ export default function AnalyticsPage() {
   }));
 
   // Leave status breakdown for donut
-  const statusSegments = [
-    { label: 'Approved',  value: approved,  color: '#22C55E' },
-    { label: 'Queued',    value: queued,     color: '#F59E0B' },
-    { label: 'Emergency', value: emergency,  color: '#DC2626' },
-    { label: 'Denied',    value: denied,     color: '#6B7280' },
-  ].filter(s => s.value > 0);
+  const statusColors = { approved: '#22C55E', pending: '#0EA5E9', queued: '#F59E0B', emergency: '#DC2626', denied: '#6B7280', rejected: '#6B7280' };
+  const statusSegments = [...new Set(allLeaves.map(leave => leave.status).filter(Boolean))]
+    .map(status => ({
+      label: status.charAt(0).toUpperCase() + status.slice(1),
+      value: allLeaves.filter(leave => leave.status === status).length,
+      color: statusColors[status] || '#8B5CF6',
+    }));
 
   // Monthly leave trend (last 6 months)
   const now = new Date();
@@ -151,9 +160,52 @@ export default function AnalyticsPage() {
   // Team workload bars
   const workloadBars = teams
     .filter(t => t.name !== 'System')
-    .map(t => ({ label: t.name.split(' ')[0], value: t.workload_current || 0 }));
+    .map(t => ({ label: t.name, value: t.workload_current || 0 }));
 
   const getWorkloadColor = (w) => w >= 80 ? '#DC2626' : w >= 50 ? '#F59E0B' : '#22C55E';
+  const burnoutBars = burnout.map(emp => ({
+    label: `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || 'Employee',
+    value: emp.last_leave_end ? Math.floor((Date.now() - new Date(emp.last_leave_end).getTime()) / 86400000) : 45,
+    color: '#F59E0B',
+  }));
+  const overrideBars = ['approved', 'denied'].map((decision, index) => ({
+    label: decision.charAt(0).toUpperCase() + decision.slice(1),
+    value: overrides.filter(item => item.decision === decision).length,
+    color: index === 0 ? '#22C55E' : '#DC2626',
+  }));
+  const queueTypes = ['annual', 'sick', 'wellness', 'emergency'].map((type, index) => ({
+    label: type.charAt(0).toUpperCase() + type.slice(1),
+    value: queue.filter(request => request.type === type).length,
+    color: ['var(--orange)', '#22C55E', '#8B5CF6', '#DC2626'][index],
+  }));
+
+  const analysisCharts = {
+    workload: { title: 'Average Team Workload', detail: `${avgWorkload}% average across ${workloadBars.length} teams`, data: workloadBars, color: 'var(--orange)' },
+    leaves: { title: 'Leave Requests', detail: `${totalLeaves} total requests, grouped by month`, data: monthlyTrend, color: 'var(--orange)' },
+    approvals: { title: 'Approval Rate', detail: `${approvalRate}% approved (${approved} of ${totalLeaves} requests)`, data: statusSegments.map(segment => ({ label: segment.label, value: segment.value, color: segment.color })) },
+    burnout: { title: 'Burnout Risk', detail: `${burnout.length} employees at risk, shown by days since last leave`, data: burnoutBars, color: '#F59E0B' },
+    status: { title: 'Leave Request Status', detail: 'Requests grouped by their current status', data: statusSegments.map(segment => ({ label: segment.label, value: segment.value, color: segment.color })) },
+    monthly: { title: 'Leave Requests by Month', detail: 'Request counts for the last six months', data: monthlyTrend, color: 'var(--orange)' },
+    types: { title: 'Leave Requests by Type', detail: 'All requests grouped by leave type', data: byType, color: 'var(--orange)' },
+    teams: { title: 'Team Workload', detail: 'Current workload percentage for each team', data: workloadBars, color: 'var(--orange)' },
+    burnoutList: { title: 'Burnout Risk by Employee', detail: 'Days since each employee’s last leave', data: burnoutBars, color: '#F59E0B' },
+    overrides: { title: 'Override Decisions', detail: 'Override counts grouped by approval decision', data: overrideBars },
+    queue: { title: 'Queued Leave Requests', detail: `${queue.length} requests grouped by leave type`, data: queueTypes },
+  };
+  const selectedChart = analysisCharts[selectedMetric];
+  const selectSection = (metric) => ({
+    role: 'button',
+    tabIndex: 0,
+    'aria-pressed': selectedMetric === metric,
+    onClick: () => setSelectedMetric(metric),
+    onKeyDown: event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        setSelectedMetric(metric);
+      }
+    },
+    className: `card cursor-pointer transition-all hover:-translate-y-0.5 focus:outline-none focus:ring-2 ${selectedMetric === metric ? 'ring-2 ring-orange-400' : ''}`,
+  });
 
   return (
     <div className="space-y-6" data-testid="analytics-page">
@@ -167,16 +219,31 @@ export default function AnalyticsPage() {
 
       {/* Top stat cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard label="Avg Team Workload"  value={`${avgWorkload}%`}  color={getWorkloadColor(avgWorkload)} icon={Activity}      sub={`${highWorkloadTeams.length} team(s) critical`} />
-        <StatCard label="Total Leave Requests" value={totalLeaves}      color="var(--orange)"                icon={Calendar}      sub="All time" />
-        <StatCard label="Approval Rate"      value={`${approvalRate}%`} color="#22C55E"                      icon={CheckCircle}   sub={`${approved} approved`} />
-        <StatCard label="Burnout Risk"       value={burnout.length}     color={burnout.length > 0 ? '#F59E0B' : '#22C55E'} icon={AlertTriangle} sub="Employees >45 days no leave" />
+        <StatCard label="Avg Team Workload" value={`${avgWorkload}%`} color={getWorkloadColor(avgWorkload)} icon={Activity} sub={`${highWorkloadTeams.length} team(s) critical`} onClick={() => setSelectedMetric('workload')} selected={selectedMetric === 'workload'} />
+        <StatCard label="Total Leave Requests" value={totalLeaves} color="var(--orange)" icon={Calendar} sub="All time" onClick={() => setSelectedMetric('leaves')} selected={selectedMetric === 'leaves'} />
+        <StatCard label="Approval Rate" value={`${approvalRate}%`} color="#22C55E" icon={CheckCircle} sub={`${approved} approved`} onClick={() => setSelectedMetric('approvals')} selected={selectedMetric === 'approvals'} />
+        <StatCard label="Burnout Risk" value={burnout.length} color={burnout.length > 0 ? '#F59E0B' : '#22C55E'} icon={AlertTriangle} sub="Employees >45 days no leave" onClick={() => setSelectedMetric('burnout')} selected={selectedMetric === 'burnout'} />
       </div>
+
+      <section className="card border-l-4" style={{ borderLeftColor: 'var(--orange)' }} aria-live="polite">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-5">
+          <div>
+            <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>{selectedChart.title}</h3>
+            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{selectedChart.detail}</p>
+          </div>
+          <span className="text-xs font-semibold uppercase" style={{ color: 'var(--orange)' }}>Selected analysis</span>
+        </div>
+        {selectedChart.data.length ? (
+          <BarChart data={selectedChart.data} color={selectedChart.color} height={180} />
+        ) : (
+          <p className="py-10 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>No data available for this graph yet.</p>
+        )}
+      </section>
 
       {/* Row 2: Leave breakdown + Monthly trend */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Leave status donut */}
-        <div className="card">
+        <div {...selectSection('status')}>
           <h3 className="font-bold mb-4" style={{ color: 'var(--text-primary)' }}>Leave Request Status</h3>
           <div className="flex items-center gap-6">
             <DonutChart segments={statusSegments} size={120} />
@@ -207,7 +274,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Monthly trend */}
-        <div className="card">
+        <div {...selectSection('monthly')}>
           <h3 className="font-bold mb-4" style={{ color: 'var(--text-primary)' }}>Leave Requests — Last 6 Months</h3>
           <BarChart data={monthlyTrend} color="var(--orange)" height={100} />
         </div>
@@ -216,7 +283,7 @@ export default function AnalyticsPage() {
       {/* Row 3: Leave type breakdown + Team workload */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Leave by type */}
-        <div className="card">
+        <div {...selectSection('types')}>
           <h3 className="font-bold mb-4" style={{ color: 'var(--text-primary)' }}>Leave by Type</h3>
           <div className="space-y-3">
             {byType.map(t => (
@@ -237,7 +304,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Team workload */}
-        <div className="card">
+        <div {...selectSection('teams')}>
           <h3 className="font-bold mb-4" style={{ color: 'var(--text-primary)' }}>Team Workload</h3>
           <div className="space-y-3">
             {teams.filter(t => t.name !== 'System').map(t => (
@@ -269,7 +336,7 @@ export default function AnalyticsPage() {
       {/* Row 4: Burnout risk + Override patterns */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Burnout risk */}
-        <div className="card">
+        <div {...selectSection('burnoutList')}>
           <div className="flex items-center gap-2 mb-4">
             <AlertTriangle size={20} style={{ color: '#F59E0B' }} />
             <h3 className="font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -311,7 +378,7 @@ export default function AnalyticsPage() {
         </div>
 
         {/* Override patterns */}
-        <div className="card">
+        <div {...selectSection('overrides')}>
           <div className="flex items-center gap-2 mb-4">
             <BarChart2 size={20} style={{ color: 'var(--orange)' }} />
             <h3 className="font-bold" style={{ color: 'var(--text-primary)' }}>
@@ -350,7 +417,7 @@ export default function AnalyticsPage() {
 
       {/* Row 5: Leave queue summary */}
       {queue.length > 0 && (
-        <div className="card">
+        <div {...selectSection('queue')}>
           <div className="flex items-center gap-2 mb-4">
             <Clock size={20} style={{ color: 'var(--orange)' }} />
             <h3 className="font-bold" style={{ color: 'var(--text-primary)' }}>

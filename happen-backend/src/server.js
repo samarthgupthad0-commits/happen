@@ -1,5 +1,7 @@
 import express from 'express'
-import { createServer } from 'http'
+import { readFileSync } from 'node:fs'
+import { createServer as createHttpServer } from 'http'
+import { createServer as createHttpsServer } from 'https'
 import { Server as SocketIO } from 'socket.io'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -28,13 +30,17 @@ import kudosRoutes from './routes/kudos.js'
 import timeEntryRoutes from './routes/timeEntries.js'
 import wellnessRoutes  from './routes/wellness.js'
 import donationRoutes  from './routes/donations.js'
+import activityRoutes  from './routes/activity.js'
+import hrRoutes from './routes/hrDirectory.js'
+import adminTeamManagementRoutes from './routes/adminTeamManagement.js'
+import { ensureUploadRoot } from './utils/storage.js'
+import { purgeExpiredActivitySessions } from './utils/activityRetention.js'
 
 
 
 // Stub routes not yet migrated
 import express2 from 'express'
 const stub = (r) => { r.get('/', (_, res) => res.json([])); r.get('/:id', (_, res) => res.json({})); return r }
-const hrRoutes         = stub(express2.Router())
 const accountingRoutes = stub(express2.Router())
 const adminRoutes      = stub(express2.Router())
 const employeeRoutes   = stub(express2.Router())
@@ -42,11 +48,17 @@ const employeeRoutes   = stub(express2.Router())
 dotenv.config()
 
 const app = express()
-const httpServer = createServer(app)
+const sslCrtFile = process.env.SSL_CRT_FILE
+const sslKeyFile = process.env.SSL_KEY_FILE
+const httpsOptions = sslCrtFile && sslKeyFile ? {
+  key: readFileSync(sslKeyFile),
+  cert: readFileSync(sslCrtFile),
+} : null
+const httpServer = httpsOptions ? createHttpsServer(httpsOptions, app) : createHttpServer(app)
 
 const corsOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',')
-  : ['http://localhost:3000', 'http://localhost:5173']
+  : ['https://localhost:3000', 'https://localhost:3001', 'https://localhost:3002', 'https://localhost:5173', 'http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002', 'http://localhost:5173']
 
 // Socket.io
 const io = new SocketIO(httpServer, {
@@ -110,10 +122,16 @@ io.on('connection', (socket) => {
 app.use(cors({ origin: corsOrigins, credentials: true }))
 app.use(helmet())
 app.use(morgan('dev'))
-app.use(express.json())
+app.use(express.json({ limit: '20mb' }))
 
 async function start() {
   await connectDB()
+  ensureUploadRoot()
+  await purgeExpiredActivitySessions().catch(error => console.error('Activity retention cleanup failed:', error))
+  const activityRetentionTimer = setInterval(() => {
+    purgeExpiredActivitySessions().catch(error => console.error('Activity retention cleanup failed:', error))
+  }, 60 * 60 * 1000)
+  activityRetentionTimer.unref()
 
   app.use('/api/auth', authRoutes)
   app.use('/api/me',             meRoutes)
@@ -134,8 +152,10 @@ async function start() {
   app.use('/api/time-entries',   timeEntryRoutes)
   app.use('/api/wellness',       wellnessRoutes)
   app.use('/api/donations',      donationRoutes)
+  app.use('/api/activity',       activityRoutes)
   app.use('/api/hr',             hrRoutes)
   app.use('/api/accounting',     accountingRoutes)
+  app.use('/api/admin',          adminTeamManagementRoutes)
   app.use('/api/admin',          adminRoutes)
   app.use('/api/employees',      employeeRoutes)
 
@@ -145,7 +165,8 @@ async function start() {
   })
 
   const PORT = process.env.PORT || 5000
-  httpServer.listen(PORT, () => console.log(`✅ Happen API + Socket.io running on http://localhost:${PORT}`))
+  const protocol = httpsOptions ? 'https' : 'http'
+  httpServer.listen(PORT, () => console.log(`✅ Happen API + Socket.io running on ${protocol}://localhost:${PORT}`))
 }
 
 start().catch(e => { console.error(e); process.exit(1) })

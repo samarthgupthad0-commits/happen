@@ -60,7 +60,7 @@ router.get('/calendar', verifyToken, requireRole('manager','hr','admin'), async 
     const lastDay  = new Date(y, m, 0).toISOString().split('T')[0]
 
     const leaves = await LeaveRequest.find({
-      status: { $in: ['approved','emergency'] },
+      status: { $in: ['pending','approved','emergency'] },
       start_date: { $lte: lastDay },
       end_date:   { $gte: firstDay },
     }).populate('user_id','first_name last_name team_id').lean()

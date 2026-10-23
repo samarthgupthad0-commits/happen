@@ -52,6 +52,48 @@
         margin: 0;
         background: var(--page-bg);
         color: var(--text-primary);
+        transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    body.dark-mode {
+        --page-bg: #111827;
+        --surface: #1f2937;
+        --text-primary: #f3f4f6;
+        --text-secondary: #cbd5e1;
+        --border: #374151;
+        --orange-pale: rgba(244, 99, 30, 0.18);
+        background: var(--page-bg);
+        color: var(--text-primary);
+    }
+
+    body.dark-mode .card {
+        background: #1f2937 !important;
+        border-color: var(--border);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    }
+
+    body.dark-mode .bg-white,
+    body.dark-mode [class*="bg-white"],
+    body.dark-mode .rounded-xl,
+    body.dark-mode .rounded-lg {
+        background-color: #1f2937 !important;
+        color: var(--text-primary) !important;
+    }
+
+    body.dark-mode input,
+    body.dark-mode select,
+    body.dark-mode textarea {
+        background-color: #111827 !important;
+        color: var(--text-primary) !important;
+        border-color: var(--border) !important;
+    }
+
+    body.dark-mode button:not(.btn-primary) {
+        color: var(--text-primary);
+    }
+
+    body.compact-mode .card {
+        padding: 0.9rem 1rem !important;
     }
     
     code {

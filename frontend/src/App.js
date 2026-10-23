@@ -13,6 +13,7 @@ import { useAuthStore } from './store/authStore';
 const HomePage           = lazy(() => import('./pages/HomePage'));
 const CalendarPage       = lazy(() => import('./pages/CalendarPage'));
 const LeavePage          = lazy(() => import('./pages/LeavePage'));
+const AllLeavesPage      = lazy(() => import('./pages/AllLeavesPage'));
 const LeaveRequestPage   = lazy(() => import('./pages/LeaveRequestPage'));
 const LeavesQueuePage    = lazy(() => import('./pages/LeavesQueuePage'));
 const CurrentLeavesPage  = lazy(() => import('./pages/CurrentLeavesPage'));
@@ -51,7 +52,8 @@ function App() {
         <BrowserRouter>
           <Suspense fallback={<Spin />}>
             <Routes>
-              <Route path="/" element={<HomePage />} />
+              <Route path="/" element={user ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+              <Route path="/home" element={<HomePage />} />
               <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <LoginPage />} />
               <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
                 <Route path="/dashboard"         element={<Dashboard />} />
@@ -59,6 +61,7 @@ function App() {
                 <Route path="/leave"             element={<LeavePage />} />
                 <Route path="/leave/request"     element={<LeaveRequestPage />} />
                 <Route path="/leave/queue"       element={<LeavesQueuePage />} />
+                <Route path="/leave/all"         element={<ProtectedRoute allowedRoles={['team_lead','manager','hr','admin']}><AllLeavesPage /></ProtectedRoute>} />
                 {/* My Team — open to all roles that belong to a team */}
                 <Route path="/team"              element={<TeamPage />} />
                 <Route path="/tasks"             element={<TasksPage />} />

@@ -39,7 +39,8 @@ function LoginPage() {
       login(data.user, data.token);
       navigate('/dashboard');
     } catch (err) {
-      setError(formatApiErrorDetail(err.response?.data?.detail) || err.message);
+      const detail = err.response?.data?.detail || err.response?.data?.error;
+      setError(detail ? formatApiErrorDetail(detail) : (err.message || 'Unable to sign in.'));
     } finally {
       setLoading(false);
     }
@@ -77,7 +78,7 @@ function LoginPage() {
         <div className="w-full max-w-md mx-auto">
           {/* Back to Home */}
           <a
-            href="/"
+            href="/home"
             className="inline-flex items-center gap-2 text-sm font-medium mb-8 transition-colors hover:-translate-x-0.5 transition-transform"
             style={{ color: 'var(--text-secondary)' }}
           >

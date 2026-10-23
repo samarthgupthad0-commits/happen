@@ -15,6 +15,11 @@ const fmt          = (d) => new Date(d).toISOString().split('T')[0]
 const todayStr     = ()  => fmt(new Date())
 const tomorrowStr  = ()  => fmt(new Date(Date.now() + 86400000))
 const oneWeekAhead = ()  => fmt(new Date(Date.now() + 7 * 86400000))
+const isDateString = (value) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) return false
+  const date = new Date(`${value}T00:00:00.000Z`)
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
 
 // Only HR + manager receive leave notifications
 async function notifyHRManager(title, message, type = 'info', refUserId = null) {
@@ -25,6 +30,14 @@ async function notifyHRManager(title, message, type = 'info', refUserId = null) 
   const ids = [...hrUsers.map(h => h._id), manager?._id].filter(Boolean)
   const link = refUserId ? `/current-leaves?employee=${refUserId}` : '/current-leaves'
   if (ids.length) await Notification.insertMany(ids.map(uid => ({ user_id: uid, title, message, type, link, ref_user_id: refUserId })))
+}
+
+async function canManageLeaveRequest(req, leaveRequest) {
+  const actor = await User.findById(req.user.id, 'role team_id').lean()
+  if (['manager', 'hr', 'admin'].includes(actor?.role)) return true
+  if (actor?.role !== 'team_lead' || !actor.team_id) return false
+  const owner = await User.findById(leaveRequest.user_id, 'team_id').lean()
+  return owner?.team_id?.toString() === actor.team_id.toString()
 }
 
 // ── GET /api/leave-requests/queue  (all queued, global, sorted by position)
@@ -46,74 +59,32 @@ router.get('/queue', verifyToken, async (req, res) => {
   } catch (e) { console.error(e); res.status(500).json({ error: 'Server error' }) }
 })
 
-// ── POST /api/leave-requests/grant-next
-// Manager or HR only. Approves the #1 queued request.
-// Cooldown: can only be used once every 4 hours per user.
-router.post('/grant-next', verifyToken, requireRole('manager', 'hr'), async (req, res) => {
+router.get('/all', verifyToken, requireRole('team_lead','manager','hr','admin'), async (req, res) => {
   try {
-    const COOLDOWN_MS = 4 * 60 * 60 * 1000 // 4 hours
+    const me = await User.findById(req.user.id).lean()
+    if (!me) return res.status(404).json({ error: 'User not found' })
 
-    // Check cooldown via audit log
-    const lastGrant = await AuditLog.findOne({
-      user_id: req.user.id,
-      action: 'queue.grant_next',
-    }).sort({ createdAt: -1 }).lean()
-
-    if (lastGrant) {
-      const elapsed = Date.now() - new Date(lastGrant.createdAt).getTime()
-      if (elapsed < COOLDOWN_MS) {
-        const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 60000)
-        return res.status(429).json({
-          error: 'Cooldown active',
-          detail: `You can grant the next leave in ${remaining} minute${remaining !== 1 ? 's' : ''}.`,
-          remaining_minutes: remaining,
-        })
-      }
+    const filter = {}
+    if (me.role === 'team_lead') {
+      if (!me.team_id) return res.json([])
+      const teamMembers = await User.find({ team_id: me.team_id }, '_id').lean()
+      filter.user_id = { $in: teamMembers.map(member => member._id) }
     }
 
-    // Find the top queued request
-    const top = await LeaveRequest.findOne({ status: 'queued' })
-      .sort({ queue_position: 1, createdAt: 1 })
-      .populate('user_id', 'first_name last_name')
+    const requests = await LeaveRequest.find(filter)
+      .populate('user_id', 'first_name last_name email team_id')
+      .sort({ createdAt: -1 })
       .lean()
-
-    if (!top) {
-      return res.status(404).json({ error: 'No requests in queue' })
-    }
-
-    // Approve it
-    await LeaveRequest.findByIdAndUpdate(top._id, {
-      status: 'approved',
-      decision_date: new Date(),
-    })
-
-    // Shift remaining queue positions down by 1
-    await LeaveRequest.updateMany(
-      { status: 'queued', queue_position: { $gt: top.queue_position } },
-      { $inc: { queue_position: -1 } }
-    )
-
-    // Notify the employee whose leave was approved
-    await Notification.create({
-      user_id: top.user_id._id,
-      title: '✅ Leave Approved',
-      message: `Your annual leave (${top.start_date} → ${top.end_date}) has been approved from the queue.`,
-      type: 'success',
-    })
-
-    // Log the action
-    const granter = await User.findById(req.user.id).lean()
-    await AuditLog.create({
-      user_id: req.user.id,
-      action: 'queue.grant_next',
-      details: `${granter.first_name} ${granter.last_name} granted queue leave to ${top.user_id.first_name} ${top.user_id.last_name} (request ${top._id})`,
-      ip_address: req.ip,
-    })
-
-    res.json({
-      message: `Leave granted to ${top.user_id.first_name} ${top.user_id.last_name}`,
-      approved: { ...top, id: top._id },
-    })
+    res.json(requests.map(request => ({
+      ...request,
+      id: request._id,
+      first_name: request.user_id?.first_name,
+      last_name: request.user_id?.last_name,
+      email: request.user_id?.email,
+      team_id: request.user_id?.team_id,
+      user_id: request.user_id?._id,
+      created_at: request.createdAt,
+    })))
   } catch (e) { console.error(e); res.status(500).json({ error: 'Server error' }) }
 })
 
@@ -205,8 +176,9 @@ router.post('/', verifyToken, async (req, res) => {
 
     // ── ANNUAL — smart grant based on workload + task status
     if (type === 'annual') {
-      if (!start_date) return res.status(400).json({ error: 'start_date required for annual leave' })
+      if (!isDateString(start_date)) return res.status(400).json({ error: 'A valid start_date is required for annual leave' })
       const end_date = req.body.end_date || start_date
+      if (!isDateString(end_date) || end_date < start_date) return res.status(400).json({ error: 'end_date must be a valid date on or after start_date' })
       if (start_date < oneWeekAhead()) {
         return res.status(400).json({ error: 'Annual leave must be requested at least 1 week in advance.' })
       }
@@ -249,7 +221,7 @@ router.post('/', verifyToken, async (req, res) => {
       }
 
       // ── QUEUE condition: workload 50-79%
-      const days = Math.ceil((new Date(end_date) - new Date(start_date)) / 86400000) + 1
+      const days = Math.floor((Date.parse(`${end_date}T00:00:00.000Z`) - Date.parse(`${start_date}T00:00:00.000Z`)) / 86400000) + 1
       let status = workload < 50 ? 'approved' : 'queued'
       let queue_position = null
 
@@ -306,37 +278,49 @@ router.get('/:id', verifyToken, async (req, res) => {
 })
 
 // ── PATCH approve / deny / override (kept for admin use)
-router.patch('/:id/approve', verifyToken, requireRole('manager','hr','admin'), async (req, res) => {
+router.patch('/:id/approve', verifyToken, async (req, res) => {
   try {
-    const lr = await LeaveRequest.findByIdAndUpdate(req.params.id, { status: 'approved', decision_date: new Date() }, { new: true })
-    if (!lr) return res.status(404).json({ error: 'Not found' })
-    await Notification.create({ user_id: lr.user_id, title: 'Leave Approved ✅', message: `Your ${lr.type} leave has been approved.`, type: 'success' })
+    const current = await LeaveRequest.findById(req.params.id)
+    if (!current) return res.status(404).json({ error: 'Not found' })
+    if (!await canManageLeaveRequest(req, current)) return res.status(403).json({ error: 'Forbidden' })
+    if (!['pending', 'queued'].includes(current.status)) return res.status(409).json({ error: 'This request has already been decided' })
+    const lr = await LeaveRequest.findOneAndUpdate({ _id: req.params.id, status: { $in: ['pending', 'queued'] } }, { status: 'approved', decision_date: new Date() }, { new: true })
+    if (!lr) return res.status(409).json({ error: 'This request was already decided' })
+    await Notification.create({ user_id: lr.user_id, title: 'Leave Approved', message: `Your ${lr.type} leave has been approved.`, type: 'success', link: '/leave' })
     res.json({ message: 'Approved', request: { ...lr.toObject(), id: lr._id } })
   } catch (e) { res.status(500).json({ error: 'Server error' }) }
 })
 
-router.patch('/:id/deny', verifyToken, requireRole('manager','hr','admin'), async (req, res) => {
+router.patch('/:id/deny', verifyToken, async (req, res) => {
   try {
     const { reason } = req.body
-    const lr = await LeaveRequest.findByIdAndUpdate(req.params.id, { status: 'denied', decision_date: new Date(), override_reason: reason || null }, { new: true })
-    if (!lr) return res.status(404).json({ error: 'Not found' })
-    await Notification.create({ user_id: lr.user_id, title: 'Leave Denied ❌', message: `Your ${lr.type} leave was denied.${reason ? ` Reason: ${reason}` : ''}`, type: 'error' })
+    const current = await LeaveRequest.findById(req.params.id)
+    if (!current) return res.status(404).json({ error: 'Not found' })
+    if (!await canManageLeaveRequest(req, current)) return res.status(403).json({ error: 'Forbidden' })
+    if (!['pending', 'queued'].includes(current.status)) return res.status(409).json({ error: 'This request has already been decided' })
+    const lr = await LeaveRequest.findOneAndUpdate({ _id: req.params.id, status: { $in: ['pending', 'queued'] } }, { status: 'denied', decision_date: new Date(), override_reason: reason || null }, { new: true })
+    if (!lr) return res.status(409).json({ error: 'This request was already decided' })
+    await Notification.create({ user_id: lr.user_id, title: 'Leave Denied', message: `Your ${lr.type} leave was denied.${reason ? ` Reason: ${reason}` : ''}`, type: 'error', link: '/leave' })
     res.json({ message: 'Denied', request: { ...lr.toObject(), id: lr._id } })
   } catch (e) { res.status(500).json({ error: 'Server error' }) }
 })
 
-router.patch('/:id/override', verifyToken, requireRole('manager','hr','admin'), async (req, res) => {
+router.patch('/:id/override', verifyToken, async (req, res) => {
   try {
     const { decision, reason } = req.body
     if (!['approved','denied'].includes(decision)) return res.status(400).json({ error: 'Invalid decision' })
     if (!reason?.trim()) return res.status(400).json({ error: 'Reason required for override' })
-    const lr = await LeaveRequest.findByIdAndUpdate(req.params.id, {
+    const current = await LeaveRequest.findById(req.params.id)
+    if (!current) return res.status(404).json({ error: 'Not found' })
+    if (!await canManageLeaveRequest(req, current)) return res.status(403).json({ error: 'Forbidden' })
+    if (!['pending', 'queued'].includes(current.status)) return res.status(409).json({ error: 'This request has already been decided' })
+    const lr = await LeaveRequest.findOneAndUpdate({ _id: req.params.id, status: { $in: ['pending', 'queued'] } }, {
       status: decision, decision_date: new Date(), override_reason: reason, manager_override: true, override_by: req.user.id,
     }, { new: true })
-    if (!lr) return res.status(404).json({ error: 'Not found' })
+    if (!lr) return res.status(409).json({ error: 'This request was already decided' })
     await Override.create({ manager_id: req.user.id, request_id: lr._id, decision, reason })
     await AuditLog.create({ user_id: req.user.id, action: 'leave_request.override', details: `Override ${lr._id} → ${decision}`, ip_address: req.ip })
-    await Notification.create({ user_id: lr.user_id, title: 'Leave Override', message: `Your leave was overridden: ${decision}.${reason ? ` Reason: ${reason}` : ''}`, type: 'warning' })
+    await Notification.create({ user_id: lr.user_id, title: 'Leave Override', message: `Your leave was overridden: ${decision}. Reason: ${reason}`, type: 'warning', link: '/leave' })
     res.json({ message: 'Override applied', request: { ...lr.toObject(), id: lr._id } })
   } catch (e) { res.status(500).json({ error: 'Server error' }) }
 })

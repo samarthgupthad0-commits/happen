@@ -4,12 +4,18 @@ import api from '../lib/axios';
 import { toast } from 'sonner';
 import { Plus, X, Clock, DollarSign, CheckCircle, Trash2, Users } from 'lucide-react';
 
-const today = () => new Date().toISOString().split('T')[0];
+const today = () => {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
 const getWeekStr = () => {
   const d = new Date();
-  const jan4 = new Date(d.getFullYear(), 0, 4);
-  const week = Math.ceil(((d - jan4) / 86400000 + jan4.getDay() + 1) / 7);
-  return `${d.getFullYear()}-W${String(week).padStart(2, '0')}`;
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const year = d.getFullYear();
+  const yearStart = new Date(year, 0, 1);
+  const week = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  return `${year}-W${String(week).padStart(2, '0')}`;
 };
 
 export default function TimesheetsPage() {
@@ -20,7 +26,7 @@ export default function TimesheetsPage() {
   const [week, setWeek] = useState(getWeekStr());
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ description: '', date: today(), hours: 1, billable: true, project_name: 'General' });
+  const [form, setForm] = useState({ description: '', date: today(), hours: 1, activity_type: 'Work', billable: true, project_name: 'General' });
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState('my');
 
@@ -29,7 +35,7 @@ export default function TimesheetsPage() {
       setLoading(true);
       const [entriesRes, summaryRes] = await Promise.all([
         api.get(`/time-entries?week=${week}`),
-        isManager ? api.get('/time-entries/summary') : Promise.resolve({ data: [] }),
+        isManager ? api.get(`/time-entries/summary?week=${week}`) : Promise.resolve({ data: [] }),
       ]);
       setData(entriesRes.data);
       setSummary(summaryRes.data);
@@ -43,10 +49,10 @@ export default function TimesheetsPage() {
     if (!form.description.trim() || !form.date || !form.hours) { toast.error('All fields required'); return; }
     setSaving(true);
     try {
-      const res = await api.post('/time-entries', form);
-      setData(d => ({ ...d, entries: [res.data, ...d.entries], totalHours: d.totalHours + res.data.hours, billableHours: d.billableHours + (res.data.billable ? res.data.hours : 0) }));
-      setShowForm(false); setForm({ description: '', date: today(), hours: 1, billable: true, project_name: 'General' });
+      await api.post('/time-entries', form);
+      setShowForm(false); setForm({ description: '', date: today(), hours: 1, activity_type: 'Work', billable: true, project_name: 'General' });
       toast.success('Time logged!');
+      await fetch();
     } catch (e) { toast.error(e.response?.data?.error || 'Failed'); }
     finally { setSaving(false); }
   };
@@ -54,7 +60,15 @@ export default function TimesheetsPage() {
   const del = async (id) => {
     try {
       await api.delete(`/time-entries/${id}`);
-      setData(d => ({ ...d, entries: d.entries.filter(e => (e._id || e.id) !== id) }));
+      setData(d => {
+        const removed = d.entries.find(entry => (entry._id || entry.id) === id);
+        return {
+          ...d,
+          entries: d.entries.filter(entry => (entry._id || entry.id) !== id),
+          totalHours: Math.max(0, d.totalHours - (removed?.hours || 0)),
+          billableHours: Math.max(0, d.billableHours - (removed?.billable ? removed.hours : 0)),
+        };
+      });
       toast.success('Entry deleted');
     } catch (e) { toast.error(e.response?.data?.error || 'Failed'); }
   };
@@ -63,6 +77,10 @@ export default function TimesheetsPage() {
     try {
       const res = await api.patch(`/time-entries/${id}/approve`);
       setData(d => ({ ...d, entries: d.entries.map(e => (e._id || e.id) === id ? { ...res.data, id: res.data._id } : e) }));
+      setSummary(current => current.map(member => ({
+        ...member,
+        time_entries: member.time_entries?.map(entry => (entry._id || entry.id) === id ? { ...entry, approved: true, approved_by: user.id } : entry),
+      })));
       toast.success('Approved');
     } catch { toast.error('Failed'); }
   };
@@ -100,6 +118,13 @@ export default function TimesheetsPage() {
             <div>
               <label className="text-xs font-semibold mb-1 block" style={{ color: 'var(--text-secondary)' }}>Hours</label>
               <input type="number" step="0.25" min="0.25" max="24" value={form.hours} onChange={e => setForm(f => ({ ...f, hours: parseFloat(e.target.value) }))} className="w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: 'var(--border)' }} />
+            </div>
+            <div>
+              <label className="text-xs font-semibold mb-1 block" style={{ color: 'var(--text-secondary)' }}>Activity</label>
+              <select value={form.activity_type} onChange={e => setForm(f => ({ ...f, activity_type: e.target.value }))} className="w-full px-3 py-2 rounded-lg border text-sm" style={{ borderColor: 'var(--border)' }}>
+                <option value="Work">Work</option>
+                <option value="Other">Other</option>
+              </select>
             </div>
             <input type="text" placeholder="Project name" value={form.project_name} onChange={e => setForm(f => ({ ...f, project_name: e.target.value }))} className="px-3 py-2 rounded-lg border text-sm" style={{ borderColor: 'var(--border)' }} />
             <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg border" style={{ borderColor: 'var(--border)' }}>
@@ -168,18 +193,14 @@ export default function TimesheetsPage() {
                     <div key={eid} className="flex items-center gap-3 p-3 rounded-xl" style={{ background: 'var(--page-bg)' }}>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold truncate">{entry.description}</p>
-                        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{entry.project_name}</p>
+                        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{entry.activity_type || 'Work'} · {entry.project_name}</p>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <span className="px-2 py-0.5 rounded-full text-xs font-bold" style={{ background: entry.billable ? '#F0FDF4' : '#F3F4F6', color: entry.billable ? '#22C55E' : '#6B7280' }}>
                           {entry.billable ? '💰 Billable' : 'Non-billable'}
                         </span>
                         <span className="font-bold text-sm" style={{ color: 'var(--orange)' }}>{entry.hours}h</span>
-                        {entry.approved
-                          ? <CheckCircle size={16} style={{ color: 'var(--success)' }} />
-                          : isManager
-                          ? <button onClick={() => approve(eid)} className="p-1 rounded hover:bg-green-50" title="Approve"><CheckCircle size={16} style={{ color: 'var(--success)' }} /></button>
-                          : null}
+                        {entry.approved && <CheckCircle size={16} style={{ color: 'var(--success)' }} />}
                         {!entry.approved && <button onClick={() => del(eid)} className="p-1 rounded hover:bg-red-50" style={{ color: 'var(--danger)' }}><Trash2 size={14} /></button>}
                       </div>
                     </div>
@@ -196,7 +217,7 @@ export default function TimesheetsPage() {
           <h3 className="font-bold mb-4">Team Hours This Week</h3>
           <div className="space-y-3">
             {summary.map((s, i) => (
-              <div key={i} className="flex items-center gap-4 p-3 rounded-xl" style={{ background: 'var(--page-bg)' }}>
+              <div key={i} className="flex flex-wrap items-center gap-4 p-3 rounded-xl" style={{ background: 'var(--page-bg)' }}>
                 <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0" style={{ background: 'var(--orange)' }}>
                   {s.user?.first_name?.charAt(0)}{s.user?.last_name?.charAt(0)}
                 </div>
@@ -209,6 +230,18 @@ export default function TimesheetsPage() {
                 <div className="text-right flex-shrink-0">
                   <p className="font-bold" style={{ color: 'var(--orange)' }}>{s.total_hours.toFixed(1)}h</p>
                   <p className="text-xs" style={{ color: 'var(--success)' }}>{s.billable_hours.toFixed(1)}h billable</p>
+                </div>
+                <div className="w-full basis-full space-y-2 border-t pt-3" style={{ borderColor: 'var(--border)' }}>
+                  {s.time_entries?.map(entry => (
+                    <div key={entry._id || entry.id} className="flex items-center justify-between gap-3 text-sm">
+                      <span className="min-w-0 truncate">{entry.date} · {entry.description} <span style={{ color: 'var(--text-secondary)' }}>({entry.project_name})</span></span>
+                      <span className="flex flex-shrink-0 items-center gap-2">
+                        <span className="font-semibold">{entry.hours}h</span>
+                        {entry.approved ? <CheckCircle size={15} style={{ color: 'var(--success)' }} /> : String(s.user?._id || s.user?.id) !== String(user?.id) && <button type="button" onClick={() => approve(entry._id || entry.id)} className="p-1 rounded hover:bg-green-50" title="Approve time entry" aria-label="Approve time entry"><CheckCircle size={16} style={{ color: 'var(--success)' }} /></button>}
+                      </span>
+                    </div>
+                  ))}
+                  {!s.time_entries?.length && <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>No entries this week</p>}
                 </div>
               </div>
             ))}

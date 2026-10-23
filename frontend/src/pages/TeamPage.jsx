@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/axios';
+import { toast } from 'sonner';
 import {
   Users, Crown, CheckCircle, Clock, AlertTriangle,
   Heart, Stethoscope, Calendar, MessageSquare, Activity,
@@ -143,7 +144,7 @@ export default function TeamPage() {
     if (!teamId) { setLoading(false); return; }
     api.get(`/teams/${teamId}/members`)
       .then(r => setTeamData(r.data))
-      .catch(e => console.error(e))
+      .catch(() => toast.error('Unable to load your team'))
       .finally(() => setLoading(false));
   }, [teamId]);
 

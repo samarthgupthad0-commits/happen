@@ -31,70 +31,49 @@ router.get('/', verifyToken, async (req, res) => {
   }
 })
 
-// POST /api/queue/grant-next  — manager/HR only, 4-hour cooldown
-router.post('/grant-next', verifyToken, requireRole('manager', 'hr'), async (req, res) => {
+// POST /api/queue/:requestId/grant — manager/HR selects a specific queued request.
+router.post('/:requestId/grant', verifyToken, requireRole('manager', 'hr'), async (req, res) => {
   try {
-    const COOLDOWN_MS = 4 * 60 * 60 * 1000
+    const reason = String(req.body?.reason || '').trim()
+    if (!reason) return res.status(400).json({ error: 'A reason is required to grant leave' })
 
-    const lastGrant = await AuditLog.findOne({
-      user_id: req.user.id,
-      action: 'queue.grant_next',
-    }).sort({ createdAt: -1 }).lean()
-
-    if (lastGrant) {
-      const elapsed = Date.now() - new Date(lastGrant.createdAt).getTime()
-      if (elapsed < COOLDOWN_MS) {
-        const remaining = Math.ceil((COOLDOWN_MS - elapsed) / 60000)
-        return res.status(429).json({
-          error: 'Cooldown active',
-          detail: `You can grant the next leave in ${remaining} minute${remaining !== 1 ? 's' : ''}.`,
-          remaining_minutes: remaining,
-        })
-      }
-    }
-
-    // Top of queue
-    const top = await LeaveRequest.findOne({ status: 'queued' })
-      .sort({ queue_position: 1, createdAt: 1 })
+    const request = await LeaveRequest.findOne({ _id: req.params.requestId, status: 'queued' })
       .populate('user_id', 'first_name last_name')
-      .lean()
+    if (!request) return res.status(404).json({ error: 'Queued leave request not found' })
 
-    if (!top) {
-      return res.status(404).json({ error: 'No requests in queue' })
+    request.status = 'approved'
+    request.decision_date = new Date()
+    request.manager_override = true
+    request.override_reason = reason
+    request.override_by = req.user.id
+    await request.save()
+
+    if (request.queue_position != null) {
+      await LeaveRequest.updateMany(
+        { status: 'queued', queue_position: { $gt: request.queue_position } },
+        { $inc: { queue_position: -1 } }
+      )
     }
 
-    // Approve it
-    await LeaveRequest.findByIdAndUpdate(top._id, {
-      status: 'approved',
-      decision_date: new Date(),
-    })
-
-    // Shift everyone else down by 1
-    await LeaveRequest.updateMany(
-      { status: 'queued', queue_position: { $gt: top.queue_position } },
-      { $inc: { queue_position: -1 } }
-    )
-
-    // Notify the approved employee
+    const employee = request.user_id
     await Notification.create({
-      user_id: top.user_id._id,
-      title: '✅ Leave Approved',
-      message: `Your annual leave (${top.start_date} → ${top.end_date}) has been approved from the queue.`,
+      user_id: employee._id,
+      title: 'Leave Approved ✅',
+      message: `Your ${request.type} leave (${request.start_date || 'date not set'}${request.end_date && request.end_date !== request.start_date ? ` to ${request.end_date}` : ''}) has been granted. Reason: ${reason}`,
       type: 'success',
     })
 
-    // Audit log
     const granter = await User.findById(req.user.id).lean()
     await AuditLog.create({
       user_id: req.user.id,
-      action: 'queue.grant_next',
-      details: `${granter.first_name} ${granter.last_name} granted queue leave to ${top.user_id.first_name} ${top.user_id.last_name}`,
+      action: 'queue.grant_selected',
+      details: `${granter.first_name} ${granter.last_name} granted queued leave ${request._id} to ${employee.first_name} ${employee.last_name}. Reason: ${reason}`,
       ip_address: req.ip,
     })
 
     res.json({
-      message: `Leave granted to ${top.user_id.first_name} ${top.user_id.last_name}`,
-      approved: { ...top, id: top._id },
+      message: `Leave granted to ${employee.first_name} ${employee.last_name}`,
+      approved: { ...request.toObject(), id: request._id },
     })
   } catch (e) {
     console.error(e)

@@ -39,7 +39,22 @@ router.post('/login', async (req, res) => {
   }
 })
 
-router.post('/logout', (req, res) => res.json({ message: 'Logged out' }))
+router.post('/logout', verifyToken, async (req, res) => {
+  try {
+    const isImpersonating = Boolean(req.user.impersonated_by)
+    await AuditLog.create({
+      user_id: isImpersonating ? req.user.impersonated_by : req.user.id,
+      action: isImpersonating ? 'admin.impersonation_ended' : 'logout',
+      details: isImpersonating
+        ? `Ended impersonation of ${req.user.email} by logout`
+        : 'User logged out',
+      ip_address: req.ip,
+    })
+  } catch (e) {
+    console.error('Logout audit logging failed:', e)
+  }
+  res.json({ message: 'Logged out' })
+})
 
 router.get('/me', verifyToken, async (req, res) => {
   try {

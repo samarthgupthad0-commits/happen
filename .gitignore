@@ -90,3 +90,10 @@ android-sdk/-e
 
 tracker/Data/*
 ./tracker/Data/
+
+# Uploaded activity report files
+happen-backend/uploads/
+
+# Local TLS certificates and tracker logs
+certs/
+tracker/agent.log

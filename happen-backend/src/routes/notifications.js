@@ -1,6 +1,7 @@
 import express from 'express'
 import Notification from '../db/models/Notification.js'
 import { verifyToken } from '../middleware/auth.js'
+import { notificationOwnerFilter } from '../utils/privacyPolicies.js'
 
 const router = express.Router()
 
@@ -13,7 +14,12 @@ router.get('/', verifyToken, async (req, res) => {
 
 router.patch('/:id/read', verifyToken, async (req, res) => {
   try {
-    await Notification.findOneAndUpdate({ _id: req.params.id, user_id: req.user.id }, { is_read: true })
+    const notification = await Notification.findOneAndUpdate(
+      notificationOwnerFilter(req.params.id, req.user.id),
+      { is_read: true },
+      { new: true },
+    )
+    if (!notification) return res.status(404).json({ error: 'Notification not found' })
     res.json({ message: 'Marked as read' })
   } catch (e) { res.status(500).json({ error: 'Server error' }) }
 })

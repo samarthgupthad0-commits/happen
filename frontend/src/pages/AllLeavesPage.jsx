@@ -184,11 +184,11 @@ function AllLeavesPage() {
                   <div className="grid grid-cols-3 gap-4 text-sm">
                     <div>
                       <p style={{ color: 'var(--text-secondary)' }}>Start Date</p>
-                      <p className="font-medium">{new Date(leave.start_date).toLocaleDateString()}</p>
+                      <p className="font-medium">{leave.start_date ? new Date(`${leave.start_date}T12:00:00`).toLocaleDateString() : 'Immediate'}</p>
                     </div>
                     <div>
                       <p style={{ color: 'var(--text-secondary)' }}>End Date</p>
-                      <p className="font-medium">{new Date(leave.end_date).toLocaleDateString()}</p>
+                      <p className="font-medium">{leave.end_date ? new Date(`${leave.end_date}T12:00:00`).toLocaleDateString() : 'Immediate'}</p>
                     </div>
                     <div>
                       <p style={{ color: 'var(--text-secondary)' }}>Duration</p>
@@ -299,7 +299,7 @@ function AllLeavesPage() {
                     Start Date
                   </label>
                   <p className="text-lg font-semibold">
-                    {new Date(selectedLeave.start_date).toLocaleDateString()}
+                    {selectedLeave.start_date ? new Date(`${selectedLeave.start_date}T12:00:00`).toLocaleDateString() : 'Immediate'}
                   </p>
                 </div>
                 <div>
@@ -307,7 +307,7 @@ function AllLeavesPage() {
                     End Date
                   </label>
                   <p className="text-lg font-semibold">
-                    {new Date(selectedLeave.end_date).toLocaleDateString()}
+                    {selectedLeave.end_date ? new Date(`${selectedLeave.end_date}T12:00:00`).toLocaleDateString() : 'Immediate'}
                   </p>
                 </div>
               </div>

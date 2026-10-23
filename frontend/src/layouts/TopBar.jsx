@@ -4,55 +4,15 @@ import { useAuthStore } from '../store/authStore';
 import { useNavigate } from 'react-router-dom';
 import api from '../lib/axios';
 
-// All demo users grouped by role — matches seed.js exactly
-const DEMO_USERS = [
-  { role: 'admin',      label: 'Admin',       color: '#7C3AED', users: [
-    { name: 'Alex Rivera',     email: 'admin@happen.com',               password: 'Admin2026!',       avatar: 'AR' },
-  ]},
-  { role: 'manager',    label: 'Manager',     color: '#F59E0B', users: [
-    { name: 'Michael Brown',   email: 'michael@creativesolutions.com',  password: 'MichaelMgr456!',   avatar: 'MB' },
-  ]},
-  { role: 'hr',         label: 'HR',          color: '#EC4899', users: [
-    { name: 'Lisa Wong',       email: 'lisa@creativesolutions.com',     password: 'LisaHR789!',       avatar: 'LW' },
-    { name: 'Kevin Park',      email: 'kevin@creativesolutions.com',    password: 'KevinHR123!',      avatar: 'KP' },
-  ]},
-  { role: 'team_lead',  label: 'Team Lead',   color: '#0EA5E9', users: [
-    { name: 'Sarah Chen',      email: 'sarah@creativesolutions.com',    password: 'SarahLead123!',    avatar: 'SC', team: 'Design' },
-    { name: 'Marcus Taylor',   email: 'marcus@creativesolutions.com',   password: 'MarcusLead456!',   avatar: 'MT', team: 'Development' },
-    { name: 'Jessica Martinez',email: 'jessica@creativesolutions.com',  password: 'JessicaLead789!',  avatar: 'JM', team: 'Marketing' },
-    { name: 'David Kim',       email: 'david.k@creativesolutions.com',  password: 'DavidLead123!',    avatar: 'DK', team: 'Client Success' },
-  ]},
-  { role: 'accounting', label: 'Accounting',  color: '#22C55E', users: [
-    { name: 'Robert Chen',     email: 'robert@creativesolutions.com',   password: 'RobertAcct789!',   avatar: 'RC' },
-    { name: 'Maria Garcia',    email: 'maria@creativesolutions.com',    password: 'MariaAcct456!',    avatar: 'MG' },
-  ]},
-  { role: 'employee',   label: 'Employee',    color: '#F4631E', users: [
-    // Design team
-    { name: 'James Wu',        email: 'james.wu@creativesolutions.com', password: 'JamesWu123!',      avatar: 'JW', team: 'Design' },
-    { name: 'Elena Rodriguez', email: 'elena@creativesolutions.com',    password: 'ElenaRod456!',     avatar: 'ER', team: 'Design' },
-    { name: 'Omar Hassan',     email: 'omar@creativesolutions.com',     password: 'OmarHas789!',      avatar: 'OH', team: 'Design' },
-    { name: 'Priya Kapoor',    email: 'priya@creativesolutions.com',    password: 'PriyaKap123!',     avatar: 'PK', team: 'Design' },
-    // Development team
-    { name: 'Andre Johnson',   email: 'andre@creativesolutions.com',    password: 'AndreDev789!',     avatar: 'AJ', team: 'Development' },
-    { name: 'Yuki Tanaka',     email: 'yuki@creativesolutions.com',     password: 'YukiTan123!',      avatar: 'YT', team: 'Development' },
-    { name: 'Lena Fischer',    email: 'lena@creativesolutions.com',     password: 'LenaFis456!',      avatar: 'LF', team: 'Development' },
-    { name: 'David Okafor',    email: 'david.o@creativesolutions.com',  password: 'DavidOk789!',      avatar: 'DO', team: 'Development' },
-    // Marketing team
-    { name: "Ryan O'Connor",   email: 'ryan@creativesolutions.com',     password: 'RyanOC123!',       avatar: 'RO', team: 'Marketing' },
-    { name: 'Nadia Petrova',   email: 'nadia@creativesolutions.com',    password: 'NadiaPet456!',     avatar: 'NP', team: 'Marketing' },
-    { name: 'Wei Zhang',       email: 'wei@creativesolutions.com',      password: 'WeiZhang789!',     avatar: 'WZ', team: 'Marketing' },
-    // Client Success team
-    { name: 'Sofia Reyes',     email: 'sofia@creativesolutions.com',    password: 'SofiaRey456!',     avatar: 'SR', team: 'Client Success' },
-    { name: 'Ahmed Al-Rashid', email: 'ahmed@creativesolutions.com',    password: 'AhmedAl789!',      avatar: 'AA', team: 'Client Success' },
-    { name: 'Emma Sullivan',   email: 'emma@creativesolutions.com',     password: 'EmmaSul123!',      avatar: 'ES', team: 'Client Success' },
-    { name: 'Carlos Mendez',   email: 'carlos@creativesolutions.com',   password: 'CarlosMen456!',    avatar: 'CM', team: 'Client Success' },
-  ]},
-];
-
 const ROLE_COLORS = {
   admin: '#7C3AED', manager: '#F59E0B', hr: '#EC4899',
   team_lead: '#0EA5E9', accounting: '#22C55E', employee: '#F4631E',
 };
+const ROLE_LABELS = {
+  admin: 'Admin', manager: 'Manager', hr: 'HR',
+  team_lead: 'Team Lead', accounting: 'Accounting', employee: 'Employee',
+};
+const ROLE_ORDER = ['admin', 'manager', 'hr', 'team_lead', 'accounting', 'employee'];
 
 function TopBar({ title }) {
   const user = useAuthStore((state) => state.user);
@@ -61,13 +21,21 @@ function TopBar({ title }) {
   const navigate = useNavigate();
   const [showDropdown, setShowDropdown] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [switchUsers, setSwitchUsers] = useState([]);
+  const [switchUsersStatus, setSwitchUsersStatus] = useState('idle');
+  const [switchUsersError, setSwitchUsersError] = useState('');
+  const [endingImpersonation, setEndingImpersonation] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [notificationStatus, setNotificationStatus] = useState('loading');
+  const [notificationError, setNotificationError] = useState('');
   const [showNotifs, setShowNotifs] = useState(false);
   const dropRef = useRef(null);
   const notifRef = useRef(null);
 
   useEffect(() => {
-    fetchNotifications();
+    fetchNotifications(true);
+    const interval = window.setInterval(() => fetchNotifications(false), 30000);
+    return () => window.clearInterval(interval);
   }, [user?.id]);
 
   useEffect(() => {
@@ -79,23 +47,47 @@ function TopBar({ title }) {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const fetchNotifications = async () => {
+  useEffect(() => {
+    if (!showDropdown || user?.role !== 'admin') return;
+    let active = true;
+    setSwitchUsersStatus('loading');
+    setSwitchUsersError('');
+    api.get('/admin/users')
+      .then(({ data }) => {
+        if (active) {
+          setSwitchUsers(data.filter(member => member.is_active !== false));
+          setSwitchUsersStatus('loaded');
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSwitchUsersError('Unable to load members');
+          setSwitchUsersStatus('error');
+        }
+      });
+    return () => { active = false; };
+  }, [showDropdown, user?.role]);
+
+  const fetchNotifications = async (showLoading = false) => {
+    if (showLoading) setNotificationStatus('loading');
     try {
       const res = await api.get('/notifications');
       setNotifications(res.data);
-    } catch { /* silent */ }
+      setNotificationError('');
+      setNotificationStatus('loaded');
+    } catch {
+      setNotificationError('Could not load notifications.');
+      setNotificationStatus('error');
+    }
   };
 
   const unreadCount = notifications.filter(n => !n.is_read).length;
 
-  const handleSwitchUser = async (demoUser) => {
+  const handleSwitchUser = async (targetUser) => {
     setSwitching(true);
     setShowDropdown(false);
     try {
-      const { data } = await api.post('/auth/login', {
-        email: demoUser.email,
-        password: demoUser.password,
-      });
+      const { data } = await api.post('/admin/impersonate', { target_user_id: targetUser._id });
       login(data.user, data.token);
       // Force full navigation to dashboard to reset all component state
       window.location.href = '/dashboard';
@@ -111,29 +103,62 @@ function TopBar({ title }) {
     navigate('/login');
   };
 
+  const handleStopImpersonating = async () => {
+    setEndingImpersonation(true);
+    try {
+      const { data } = await api.post('/admin/impersonate/stop');
+      login(data.user, data.token);
+      window.location.href = '/admin';
+    } catch (error) {
+      console.error('Unable to stop impersonation:', error);
+      setEndingImpersonation(false);
+    }
+  };
+
   const markAllRead = async () => {
     try {
       await api.patch('/notifications/read-all');
-      setNotifications(notifications.map(n => ({ ...n, is_read: 1 })));
-    } catch { /* silent */ }
+      setNotifications(current => current.map(n => ({ ...n, is_read: true })));
+      setNotificationError('');
+    } catch {
+      setNotificationError('Unable to mark notifications as read. Try again.');
+    }
   };
 
   const getInitials = (u) => u
     ? `${u.first_name?.charAt(0) || ''}${u.last_name?.charAt(0) || ''}`.toUpperCase()
     : 'U';
 
+  const switchUserGroups = ROLE_ORDER.map(role => ({
+    role,
+    label: ROLE_LABELS[role],
+    color: ROLE_COLORS[role],
+    users: switchUsers.filter(member => member.role === role && (role !== 'admin' || member._id === user?.id || member._id === user?._id)),
+  })).filter(group => group.users.length > 0);
+
   const roleColor = ROLE_COLORS[user?.role] || 'var(--orange)';
 
   return (
     <header
-      className="sticky top-0 h-16 bg-white border-b flex items-center justify-between px-6 z-40"
+      className="sticky top-0 h-16 bg-white border-b flex items-center justify-between gap-2 px-3 sm:px-6 z-40"
       style={{ borderColor: 'var(--border)' }}
     >
-      <h1 className="text-xl font-semibold" style={{ color: 'var(--text-primary)' }}>
+      <h1 className="min-w-0 truncate text-lg font-semibold sm:text-xl" style={{ color: 'var(--text-primary)' }}>
         {title}
       </h1>
 
       <div className="flex items-center gap-3">
+        {user?.impersonated_by && (
+          <button
+            type="button"
+            onClick={handleStopImpersonating}
+            disabled={endingImpersonation}
+            className="rounded border px-3 py-2 text-sm font-semibold disabled:opacity-50"
+            style={{ borderColor: 'var(--orange)', color: 'var(--orange)' }}
+          >
+            {endingImpersonation ? 'Returning...' : 'Stop impersonating'}
+          </button>
+        )}
         {/* Search */}
         <div className="relative hidden md:block">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -150,6 +175,9 @@ function TopBar({ title }) {
           <button
             onClick={() => setShowNotifs(!showNotifs)}
             className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ''}`}
+            aria-expanded={showNotifs}
+            aria-controls="notifications-menu"
           >
             <Bell size={20} style={{ color: 'var(--text-secondary)' }} />
             {unreadCount > 0 && (
@@ -163,22 +191,32 @@ function TopBar({ title }) {
           </button>
 
           {showNotifs && (
-            <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border overflow-hidden z-50 animate-fadeIn" style={{ borderColor: 'var(--border)' }}>
-              <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
+            <div id="notifications-menu" role="region" aria-label="Notifications" className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-1rem)] bg-white rounded-xl shadow-xl border overflow-hidden z-50 animate-fadeIn" style={{ borderColor: 'var(--border)' }}>
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
                 <span className="font-semibold text-sm">Notifications</span>
                 {unreadCount > 0 && (
-                  <button onClick={markAllRead} className="text-xs" style={{ color: 'var(--orange)' }}>
+                  <button type="button" onClick={markAllRead} className="text-xs" style={{ color: 'var(--orange)' }}>
                     Mark all read
                   </button>
                 )}
               </div>
+              {notificationError && <p className="px-4 py-2 text-xs" role="alert" style={{ color: 'var(--danger)' }}>{notificationError}</p>}
               <div className="max-h-72 overflow-y-auto">
-                {notifications.length === 0 ? (
-                  <p className="text-center py-8 text-sm" style={{ color: 'var(--text-secondary)' }}>No notifications</p>
+                {notificationStatus === 'loading' ? (
+                  <p className="text-center py-8 text-sm" role="status" style={{ color: 'var(--text-secondary)' }}>Loading notifications…</p>
+                ) : notificationStatus === 'error' ? (
+                  <div className="flex flex-col items-center gap-2 py-6">
+                    <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Notifications are unavailable.</p>
+                    <button type="button" onClick={() => fetchNotifications(true)} className="rounded border px-3 py-1.5 text-xs font-semibold" style={{ borderColor: 'var(--border)' }}>Retry</button>
+                  </div>
+                ) : notifications.length === 0 ? (
+                  <p className="text-center py-8 text-sm" role="status" style={{ color: 'var(--text-secondary)' }}>No notifications</p>
                 ) : notifications.map(n => (
-                  <div
+                  <button
+                    type="button"
                     key={n.id}
-                    className="px-4 py-3 border-b hover:bg-gray-50 transition-colors cursor-pointer"
+                    className="block w-full px-4 py-3 border-b text-left hover:bg-gray-50 transition-colors"
+                    aria-label={`${n.title}${n.is_read ? '' : ', unread'}`}
                     style={{
                       borderColor: 'var(--border)',
                       background: n.is_read ? 'white' : 'var(--orange-pale)',
@@ -186,7 +224,13 @@ function TopBar({ title }) {
                     onClick={async () => {
                       // Mark read
                       if (!n.is_read) {
-                        try { await api.patch(`/notifications/${n.id}/read`); } catch {}
+                        try {
+                          await api.patch(`/notifications/${n.id}/read`);
+                          setNotificationError('');
+                        } catch {
+                          setNotificationError('Unable to mark this notification as read. Try again.');
+                          return;
+                        }
                         setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, is_read: true } : x));
                       }
                       // Navigate if link exists
@@ -210,7 +254,7 @@ function TopBar({ title }) {
                         </span>
                       )}
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -271,7 +315,15 @@ function TopBar({ title }) {
                   </span>
                 </div>
                 <div className="max-h-64 overflow-y-auto space-y-1">
-                  {DEMO_USERS.map(group => (
+                  {user?.role !== 'admin' ? (
+                    <p className="px-2 py-3 text-sm" style={{ color: 'var(--text-secondary)' }}>Available to admins only</p>
+                  ) : switchUsersStatus === 'loading' ? (
+                    <p className="px-2 py-3 text-sm" role="status" style={{ color: 'var(--text-secondary)' }}>Loading members...</p>
+                  ) : switchUsersError ? (
+                    <p className="px-2 py-3 text-sm" role="alert" style={{ color: 'var(--danger)' }}>{switchUsersError}</p>
+                  ) : switchUserGroups.length === 0 ? (
+                    <p className="px-2 py-3 text-sm" style={{ color: 'var(--text-secondary)' }}>No members found</p>
+                  ) : switchUserGroups.map(group => (
                     <div key={group.role}>
                       <p
                         className="text-xs font-bold px-2 py-1 rounded uppercase tracking-wide"
@@ -279,13 +331,16 @@ function TopBar({ title }) {
                       >
                         {group.label}
                       </p>
-                      {group.users.map(u => {
-                        const isCurrent = u.email === user?.email;
+                      {group.users.map(member => {
+                        const isCurrent = member.email === user?.email;
+                        const memberName = `${member.first_name} ${member.last_name}`.trim();
+                        const memberTeam = typeof member.team_id === 'object' ? member.team_id?.name : '';
+                        const canSwitch = !isCurrent && member.role !== 'admin';
                         return (
                           <button
-                            key={u.email}
-                            onClick={() => !isCurrent && handleSwitchUser(u)}
-                            disabled={isCurrent || switching}
+                            key={member._id}
+                            onClick={() => canSwitch && handleSwitchUser(member)}
+                            disabled={!canSwitch || switching}
                             className="w-full flex items-center gap-3 px-2 py-2 rounded-lg text-left transition-all duration-150 disabled:cursor-default"
                             style={{
                               background: isCurrent ? `${group.color}20` : 'transparent',
@@ -297,11 +352,11 @@ function TopBar({ title }) {
                               className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
                               style={{ background: group.color }}
                             >
-                              {u.avatar}
+                              {getInitials(member)}
                             </div>
                             <span className="text-sm font-medium flex-1" style={{ color: 'var(--text-primary)' }}>
-                              {u.name}
-                              {u.team && <span className="text-xs ml-1" style={{ color: 'var(--text-secondary)' }}>· {u.team}</span>}
+                              {memberName}
+                              {memberTeam && <span className="text-xs ml-1" style={{ color: 'var(--text-secondary)' }}>· {memberTeam}</span>}
                             </span>
                             {isCurrent && (
                               <span className="text-xs px-1.5 py-0.5 rounded font-semibold text-white" style={{ background: group.color }}>

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useAuthStore } from '../store/authStore';
 import api from '../lib/axios';
 import { toast } from 'sonner';
-import { Plus, X, Target, TrendingUp, TrendingDown, Minus, MessageCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, X, Target, TrendingUp, TrendingDown, Minus, MessageCircle, ChevronDown, ChevronUp, Download } from 'lucide-react';
 
 const STATUS_CONFIG = {
   on_track:  { label: 'On Track',  color: '#22C55E', bg: '#F0FDF4' },
@@ -16,6 +16,12 @@ const MOOD_CONFIG = {
   okay:       { emoji: '😐', label: 'Okay',       color: '#F59E0B' },
   struggling: { emoji: '😔', label: 'Struggling', color: '#DC2626' },
 };
+
+const escapeReportText = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
 
 function OKRCard({ okr, onUpdate }) {
   const user = useAuthStore(s => s.user);
@@ -207,6 +213,34 @@ export default function PerformancePage() {
   const myOKRs = okrs.filter(o => (o.owner_id?._id || o.owner_id)?.toString() === myId?.toString());
   const reportsOKRs = okrs.filter(o => (o.manager_id?._id || o.manager_id)?.toString() === myId?.toString() && (o.owner_id?._id || o.owner_id)?.toString() !== myId?.toString());
 
+  const downloadMonthlyPerformance = () => {
+    const reportDate = new Date();
+    const monthLabel = reportDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const fileMonth = `${reportDate.getFullYear()}-${String(reportDate.getMonth() + 1).padStart(2, '0')}`;
+    const employeeName = `${user?.first_name || ''} ${user?.last_name || ''}`.trim() || 'Employee';
+    const reportOKRs = [...myOKRs, ...reportsOKRs];
+    const okrRows = reportOKRs.length
+      ? reportOKRs.map((okr) => {
+        const progress = okr.key_results?.length
+          ? Math.round(okr.key_results.reduce((sum, result) => sum + (result.target ? Math.min(100, (result.current / result.target) * 100) : 0), 0) / okr.key_results.length)
+          : 0;
+        return `<tr><td>${escapeReportText(okr.title)}</td><td>${escapeReportText(okr.quarter)}</td><td>${escapeReportText(STATUS_CONFIG[okr.status]?.label || 'On Track')}</td><td>${progress}%</td></tr>`;
+      }).join('')
+      : '<tr><td colspan="4">No OKRs recorded.</td></tr>';
+    const checkIns = reportOKRs.flatMap((okr) => (okr.check_ins || []).map((checkIn) => ({ ...checkIn, objective: okr.title })));
+    const checkInRows = checkIns.length
+      ? checkIns.map((checkIn) => `<tr><td>${escapeReportText(new Date(checkIn.createdAt).toLocaleDateString('en-US'))}</td><td>${escapeReportText(checkIn.objective)}</td><td>${escapeReportText(MOOD_CONFIG[checkIn.mood]?.label || checkIn.mood)}</td><td>${escapeReportText(checkIn.note)}</td></tr>`).join('')
+      : '<tr><td colspan="4">No check-ins recorded.</td></tr>';
+    const report = `<!doctype html><html><head><meta charset="utf-8"><title>Monthly Performance Report</title><style>body{font-family:Arial,sans-serif;color:#1f2937;padding:32px}h1{color:#f4631e}h2{margin-top:28px;color:#374151}.meta{color:#6b7280}.stats{display:flex;gap:16px;margin:20px 0}.stat{border:1px solid #d1d5db;padding:14px;min-width:130px}.value{font-size:24px;font-weight:700}table{border-collapse:collapse;width:100%;margin-top:12px}th,td{border:1px solid #d1d5db;padding:10px;text-align:left}th{background:#f3f4f6}</style></head><body><h1>Monthly Performance Report</h1><p class="meta"><strong>Reporting month:</strong> ${escapeReportText(monthLabel)}<br><strong>Employee:</strong> ${escapeReportText(employeeName)}<br><strong>Role:</strong> ${escapeReportText(user?.role?.replace('_', ' ') || 'Employee')}</p><h2>Summary</h2><div class="stats"><div class="stat"><div>Objectives</div><div class="value">${reportOKRs.length}</div></div><div class="stat"><div>Check-ins</div><div class="value">${checkIns.length}</div></div><div class="stat"><div>Average progress</div><div class="value">${reportOKRs.length ? Math.round(reportOKRs.reduce((sum, okr) => sum + (okr.key_results?.length ? okr.key_results.reduce((total, result) => total + (result.target ? Math.min(100, (result.current / result.target) * 100) : 0), 0) / okr.key_results.length : 0), 0) / reportOKRs.length) : 0}%</div></div></div><h2>Objectives and key results</h2><table><thead><tr><th>Objective</th><th>Quarter</th><th>Status</th><th>Progress</th></tr></thead><tbody>${okrRows}</tbody></table><h2>Feedback check-ins</h2><table><thead><tr><th>Date</th><th>Objective</th><th>Mood</th><th>Notes</th></tr></thead><tbody>${checkInRows}</tbody></table><p class="meta">Generated on ${escapeReportText(reportDate.toLocaleString('en-US'))} from Happen.</p></body></html>`;
+    const url = URL.createObjectURL(new Blob([report], { type: 'application/msword' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `monthly-performance-${employeeName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${fileMonth}.doc`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success('Monthly performance document downloaded');
+  };
+
   if (loading) return <div className="flex justify-center py-16"><div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderColor: 'var(--orange)' }} /></div>;
 
   return (
@@ -216,9 +250,14 @@ export default function PerformancePage() {
           <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Performance & 1-on-1s</h2>
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>OKRs, key results, and weekly check-ins</p>
         </div>
-        <button onClick={() => setShowForm(v => !v)} className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-white" style={{ background: 'var(--orange)' }}>
-          <Plus size={18} /> New OKR
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={downloadMonthlyPerformance} className="flex items-center gap-2 px-4 py-2 rounded-lg border font-semibold" style={{ borderColor: 'var(--border)', color: 'var(--text-primary)' }}>
+            <Download size={17} /> Download monthly report
+          </button>
+          <button onClick={() => setShowForm(v => !v)} className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-white" style={{ background: 'var(--orange)' }}>
+            <Plus size={18} /> New OKR
+          </button>
+        </div>
       </div>
 
       {showForm && (

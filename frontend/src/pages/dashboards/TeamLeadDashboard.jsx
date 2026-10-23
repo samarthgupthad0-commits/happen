@@ -6,6 +6,16 @@ import { CheckCircle, XCircle, AlertTriangle, Users, Clock, TrendingUp, BarChart
 import { toast } from 'sonner';
 import { formatApiErrorDetail } from '../../utils/formatError';
 
+const currentIsoWeek = () => {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() + 4 - (date.getUTCDay() || 7));
+  const year = date.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(year, 0, 1));
+  const week = Math.ceil(((date - yearStart) / 86400000 + 1) / 7);
+  return `${year}-W${String(week).padStart(2, '0')}`;
+};
+
 function TeamLeadDashboard() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
@@ -15,30 +25,43 @@ function TeamLeadDashboard() {
   const [activeTab, setActiveTab] = useState('overview');
   const [overrideModal, setOverrideModal] = useState(null);
   const [overrideReason, setOverrideReason] = useState('');
+  const [activityWeek, setActivityWeek] = useState(currentIsoWeek);
+  const [activityReport, setActivityReport] = useState(null);
+  const [activityReportLoading, setActivityReportLoading] = useState(false);
 
   useEffect(() => {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    const teamId = user?.team_id?._id || user?.team_id;
+    if (!teamId) return;
+    let active = true;
+    setActivityReportLoading(true);
+    api.get(`/time-entries/activity-report?week=${activityWeek}`)
+      .then((response) => { if (active) setActivityReport(response.data); })
+      .catch(() => { if (active) toast.error('Failed to load weekly activity report'); })
+      .finally(() => { if (active) setActivityReportLoading(false); });
+    return () => { active = false; };
+  }, [activityWeek, user?.team_id]);
+
   const fetchData = async () => {
     try {
       if (!user?.team_id) return;
 
-      const [requestsRes, queueRes, analyticsRes, workloadRes] = await Promise.all([
+      const [requestsRes, queueRes, analyticsRes, workloadRes, membersRes] = await Promise.all([
         api.get(`/teams/${user.team_id?._id || user.team_id}/requests`),
         api.get(`/teams/${user.team_id?._id || user.team_id}/queue`),
         api.get(`/teams/${user.team_id?._id || user.team_id}/analytics`),
         api.get(`/teams/${user.team_id?._id || user.team_id}/workload`),
+        api.get(`/teams/${user.team_id?._id || user.team_id}/members`),
       ]);
 
       setRequests(requestsRes.data);
       setQueue(queueRes.data);
       
       // Calculate stats
-      const today = new Date().toISOString().split('T')[0];
-      const onLeaveToday = requestsRes.data.filter(r => 
-        r.status === 'approved' && r.start_date <= today && r.end_date >= today
-      ).length;
+      const onLeaveToday = membersRes.data.members.filter(member => member.current_leave).length;
 
       setStats({
         workload: workloadRes.data.workload_current || 0,
@@ -156,7 +179,7 @@ function TeamLeadDashboard() {
       <div className="card">
         <div className="border-b mb-6" style={{ borderColor: 'var(--border)' }}>
           <div className="flex gap-6">
-            {['overview', 'requests', 'queue', 'analytics'].map((tab) => (
+            {['overview', 'requests', 'queue', 'activity', 'analytics'].map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -165,7 +188,7 @@ function TeamLeadDashboard() {
                   color: activeTab === tab ? 'var(--orange)' : 'var(--text-secondary)',
                 }}
               >
-                {tab === 'requests' ? 'Team Requests' : tab}
+                {tab === 'requests' ? 'Team Requests' : tab === 'activity' ? 'Weekly Activity' : tab}
                 {activeTab === tab && (
                   <div
                     className="absolute bottom-0 left-0 right-0 h-0.5"
@@ -201,6 +224,12 @@ function TeamLeadDashboard() {
                     className="w-full text-left px-4 py-2 rounded-lg hover:bg-white transition-colors"
                   >
                     Open team calendar
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('activity')}
+                    className="w-full text-left px-4 py-2 rounded-lg hover:bg-white transition-colors"
+                  >
+                    View weekly Work and Other hours
                   </button>
                 </div>
               </div>
@@ -406,6 +435,60 @@ function TeamLeadDashboard() {
             <p style={{ color: 'var(--text-secondary)' }}>
               Team analytics and insights coming soon
             </p>
+          </div>
+        )}
+
+        {activeTab === 'activity' && (
+          <div className="space-y-4" data-testid="weekly-activity-report">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Weekly Activity Report</h3>
+                <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+                  Employee-reported Work and Other hours{activityReport?.start_date ? ` · ${activityReport.start_date} to ${activityReport.end_date}` : ''}
+                </p>
+              </div>
+              <label className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
+                Week
+                <input type="week" value={activityWeek} onChange={(event) => setActivityWeek(event.target.value)} className="ml-2 rounded-lg border px-3 py-2 font-normal" style={{ borderColor: 'var(--border)', color: 'var(--text-primary)' }} />
+              </label>
+            </div>
+            {activityReportLoading ? (
+              <p className="py-8 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>Loading activity report…</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>
+                      <th className="py-3 pr-4">Employee</th>
+                      <th className="py-3 pr-4">Work hours</th>
+                      <th className="py-3 pr-4">Other hours</th>
+                      <th className="py-3">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(activityReport?.employees || []).map((employee) => (
+                      <tr key={employee.id} className="border-b" style={{ borderColor: 'var(--border)' }}>
+                        <td className="py-3 pr-4 font-semibold">{employee.first_name} {employee.last_name}</td>
+                        <td className="py-3 pr-4">{employee.work_hours.toFixed(2)} h <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>({employee.work_entries} entries)</span></td>
+                        <td className="py-3 pr-4">{employee.other_hours.toFixed(2)} h <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>({employee.other_entries} entries)</span></td>
+                        <td className="py-3 font-bold">{employee.total_hours.toFixed(2)} h</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {activityReport?.employees?.length > 0 && (
+                    <tfoot>
+                      <tr className="border-t-2 font-bold" style={{ borderColor: 'var(--border)' }}>
+                        <td className="py-3 pr-4">Team total</td>
+                        <td className="py-3 pr-4">{activityReport.employees.reduce((sum, employee) => sum + employee.work_hours, 0).toFixed(2)} h</td>
+                        <td className="py-3 pr-4">{activityReport.employees.reduce((sum, employee) => sum + employee.other_hours, 0).toFixed(2)} h</td>
+                        <td className="py-3">{activityReport.employees.reduce((sum, employee) => sum + employee.total_hours, 0).toFixed(2)} h</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+                {!activityReport?.employees?.length && <p className="py-8 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>No active employees found for this team.</p>}
+              </div>
+            )}
           </div>
         )}
       </div>
